@@ -40,6 +40,13 @@ GENERIC_STOP_WORDS = {
 currenttimemillis = lambda: int(round(time.time() * 1000))
 
 
+def extract_json_from_crew_output(crew_output: str) -> dict:
+    # find location of : ```json
+    start = crew_output.find("```json") + len("```json")
+    end = crew_output.find("```", start)
+    return json.loads(crew_output[start:end])
+
+
 def download_file(url):
     try:
         response = requests.get(url)
