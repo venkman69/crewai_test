@@ -1,0 +1,13 @@
+[project]
+name = "openai_test"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "crewai[google-genai]",
+    "openai>=2.8.1",
+    "diskcache>=5.3.1",
+    "pdfminer.six>=20221105",
+]
