@@ -140,11 +140,11 @@ job_vs_resume_skill_matching_task = Task(
     description="""Identify a match score for the job and candidate skills.
     Compare the required and preferred skills for the job with the candidate skills and assign a score.
     Use this criteria to calculate the score:
-    1. Count the number of required skills in the job that are present in the candidate and divide by the total number of required skills in the job to get the required skill match score.
-    2. Count the number of preferred skills in the job that are present in the candidate and divide by the total number of preferred skills in the job to get the preferred skill match score.
-    3. Final score = (required skill match score * 0.7 + preferred skill match score * 0.3 ) / 2 
+    1. Calculate 'required_skill_match_score': Count the number of required skills in the job that are present in the candidate and divide by the total number of required skills in the job to get the required skill match score.
+    2. Calculate 'preferred_skill_match_score': Count the number of preferred skills in the job that are present in the candidate and divide by the total number of preferred skills in the job to get the preferred skill match score.
+    3. Calculate 'final_score': Final score = required_skill_match_score * 0.7 + preferred_skill_match_score * 0.3  
     for example if job has 10 required skills and 5 preferred skills and 
-       candidate has 8 required skills and 3 preferred skills then final score = (8/10 * 0.7 + 3/5 * 0.3 ) / 2 = 0.85
+       candidate has 8 required skills and 3 preferred skills then final score = 8/10 * 0.7 + 3/5 * 0.3 = 0.74
     4. Score data should be presented as keys in JSON output as below:
        a. A tag named "score" which is a dictionary with the following keys:
           i. final_score
@@ -166,10 +166,31 @@ job_vs_resume_skill_matching_task = Task(
     context=[job_skill_analyzer_task, resume_skill_analyzer_task],
 )
 
+complete_flow = Crew(
+    agents=[
+        resume_text_extractor_agent,
+        resume_skill_analyzer_agent,
+        job_text_extractor_agent,
+        job_skill_analyzer_agent,
+        job_vs_resume_skill_matching_agent,
+    ],
+    tasks=[
+        resume_text_extraction_task,
+        resume_skill_analyzer_task,
+        job_text_extraction_task,
+        job_skill_analyzer_task,
+        job_vs_resume_skill_matching_task,
+    ],
+    process=Process.sequential,
+    verbose=True,
+)
+
+
 if __name__ == "__main__":
-    do_resume = True
-    do_job = True
-    do_jobscore = True
+    do_resume = False
+    do_job = False
+    do_jobscore = False
+    do_entire = True
     do_caching = False
     resume_analysis_inputs = {
         "resume": "/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf",
@@ -269,9 +290,7 @@ if __name__ == "__main__":
                 )
             else:
                 print(f"Job vs Resume skill matching not cached - running crewai")
-                job_score_result = job_scorer_crew_runner.kickoff(
-                    inputs=job_analysis_inputs
-                )
+                job_score_result = job_scorer_crew_runner.kickoff()
                 utils.dc.set(
                     job_vs_resume_skill_matching_text_for_caching, job_score_result
                 )
@@ -279,9 +298,7 @@ if __name__ == "__main__":
             print(
                 f"Job vs Resume skill matching: do_caching is False ({do_caching}) - running crewai"
             )
-            job_score_result = job_scorer_crew_runner.kickoff(
-                inputs=job_analysis_inputs
-            )
+            job_score_result = job_scorer_crew_runner.kickoff()
         with open("job_vs_resume_skill_matching.txt", "w") as f:
             f.write(job_score_result.raw)
         with open("job_vs_resume_skill_matching.json", "w") as f:
@@ -290,4 +307,30 @@ if __name__ == "__main__":
             end = job_score_result.raw.find("```", start)
             f.write(job_score_result.raw[start:end])
 
+    if do_entire:
+        complete_flow_inputs = {
+            "resume": resume_analysis_inputs["resume"],
+            "job_description": job_analysis_inputs["job_description"],
+        }
+        complete_flow_result = complete_flow.kickoff(inputs=complete_flow_inputs)
+        with open("complete_flow.txt", "w") as f:
+            f.write(complete_flow_result.raw)
+
     print("--- Crew Execution Finished ---")
+    print("Writing task outputs to files")
+    os.makedirs("logs", exist_ok=True)
+    complete_flow_result_json = utils.extract_json_from_crew_output(
+        complete_flow_result.raw
+    )
+    job_id = complete_flow_result_json["job_posting_details"]["job_id"]
+    job_source = complete_flow_result_json["job_posting_details"]["job_source"]
+    job_filename = f"job_skills_analysis_{job_source}_{job_id}.txt"
+    with open(f"logs/{job_filename}", "w") as f:
+        for i, task_output in enumerate(complete_flow_result.tasks_output):
+            f.write(f"-------------- {task_output.agent} --------------\n")
+            f.write(f"Description:\n{task_output.description}\n")
+            f.write(f"Summary:\n{task_output.summary}\n")
+            for mesg in task_output.messages:
+                f.write(f"{mesg['role']}: {mesg['content']}\n")
+            f.write(f"Raw:\n{task_output.raw}\n")
+            f.write("\n")
