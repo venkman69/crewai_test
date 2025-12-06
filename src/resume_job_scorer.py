@@ -4,7 +4,7 @@ from lib import utils
 from pathlib import Path
 from crewai.tools import BaseTool
 from crewai import Agent, Task, Crew, Process, CrewOutput
-import sys
+import json
 import datetime
 # from crewai.memory import LongTermMemory
 
@@ -31,7 +31,7 @@ class TextExtractor(BaseTool):
                     return utils.extract_text_from_pdf(text_source)
                 elif text_source.endswith(".txt"):
                     print(f"Extracting text from TXT: {text_source}")
-                    return utils.extract_text_from_txt(text_source)
+                    return utils.extract_text_from_file(text_source)
             elif text_source.startswith("http"):
                 print(f"Extracting text from URL: {text_source}")
                 return utils.get_text_from_url(text_source)
@@ -121,20 +121,19 @@ job_skill_analyzer_agent = Agent(
     goal="""Extract the skills from the job description. """,
     backstory="""You are an expert HR professional specializing in identifying skills 
     within a job description. You can also extract the organization name from the job description.
-    You can also extract the job posting details such as job_source, job_id and job_url from the url
-    In addition you can pass the job posting details.""",
+    """,
     llm=gemini_llm,
     verbose=True,
     allow_delegation=False,
     memory=True,
-    tools=[job_source_identifier],
 )
 job_skill_analyzer_task = Task(
-    description="""Extract the organization name, summary of the role, years of industry experience, and skills from provided inputs in: {job_text} and {job_url}.
+    description="""Extract the organization name, summary of the role, years of industry experience, and skills from provided inputs in: job_text:{job_text} and job_details:{job_details}.
     Skills should be categorized into required and preferred.
     if a particular skill mentions a minimum years of experience, 
     then represent it within brackets for example "Python (2 years)".
-    Add the organization name and years of experience to the job_posting_details and pass it.""",
+    Add the job_details to the output.
+    Add the organization name and years of experience to the job_posting_details.""",
     agent=job_skill_analyzer_agent,
     expected_output="""Output should be in JSON format, 
     for example : 
@@ -260,7 +259,9 @@ resume_vs_job_decision_task = Task(
 )
 
 
-def resume_skill_analyser_crew(resume_url_or_text: str, cache: bool = True):
+def resume_skill_analyser_crew(
+    resume_url_or_text: str, cache: bool = True
+) -> tuple[CrewOutput, str]:
     # get the resume text
     resume_text = text_extractor.run(resume_url_or_text)
     if cache and resume_text in utils.dc:
@@ -278,14 +279,15 @@ def resume_skill_analyser_crew(resume_url_or_text: str, cache: bool = True):
     )
     result = resume_crew.kickoff(inputs={"resume_url_or_text": resume_text})
     print("Caching result for resume")
-    utils.dc[resume_text] = result
-    save_resume_skill_analysis(result)
-    return result
+    save_path = save_resume_skill_analysis(result)
+    utils.dc[resume_text] = result, save_path
+    return result, save_path
 
 
-def job_skill_analyser_crew(job_url: str, cache: bool = True):
+def job_skill_analyser_crew(job_url: str, cache: bool = True) -> tuple[CrewOutput, str]:
     # get the job text
     job_text = text_extractor.run(job_url)
+    job_details = job_source_identifier.run(job_url)
     if cache and job_text in utils.dc:
         print("Returning cached result for job")
         return utils.dc[job_text]
@@ -299,16 +301,18 @@ def job_skill_analyser_crew(job_url: str, cache: bool = True):
         process=Process.sequential,
         verbose=True,
     )
-    result = job_crew.kickoff(inputs={"job_text": job_text, "job_url": job_url})
+    result = job_crew.kickoff(
+        inputs={"job_text": job_text, "job_details": json.dumps(job_details)}
+    )
     print("Caching result for job")
-    utils.dc[job_text] = result
-    save_job_skill_analysis(result)
-    return result
+    save_path = save_job_skill_analysis(result, "job_skill_analysis")
+    utils.dc[job_text] = (result, save_path)
+    return result, save_path
 
 
 def compare_and_decide_crew(
     resume_analysis: str, job_analysis: str, cache: bool = True
-):
+) -> tuple[CrewOutput, str]:
     if cache and (resume_analysis, job_analysis) in utils.dc:
         print("Returning cached result for compare and decide")
         return utils.dc[(resume_analysis, job_analysis)]
@@ -329,8 +333,8 @@ def compare_and_decide_crew(
     )
     print("Caching result for compare and decide")
     utils.dc[(resume_analysis, job_analysis)] = result
-    save_final_crew_result(result)
-    return result
+    save_path = save_job_skill_analysis(result, "final_decision")
+    return result, save_path
 
 
 class FakeResult:
@@ -345,26 +349,22 @@ class FakeResult:
                 self.raw = ""
 
 
-def save_final_crew_result(crew_result: CrewOutput):
-    print("Writing Job task outputs to files")
-    os.makedirs("logs", exist_ok=True)
-    complete_flow_result_json = utils.extract_json_from_crew_output(crew_result.raw)
-    job_id = complete_flow_result_json["job_posting_details"]["job_id"]
-    job_source = complete_flow_result_json["job_posting_details"]["job_source"]
-    job_filename = f"final_decision_{job_source}_{job_id}.txt"
-    save_result(crew_result, job_filename)
-    return job_filename
-
-
-def save_job_skill_analysis(crew_result: CrewOutput):
-    print("Writing Job task outputs to files")
+def save_job_skill_analysis(crew_result: CrewOutput, prefix: str):
+    print(f"Writing {prefix} task output")
     os.makedirs("logs", exist_ok=True)
     job_skill_analysis_result_json = utils.extract_json_from_crew_output(
         crew_result.raw
     )
-    job_id = job_skill_analysis_result_json["job_posting_details"]["job_id"]
-    job_source = job_skill_analysis_result_json["job_posting_details"]["job_source"]
-    job_filename = f"job_skills_analysis_{job_source}_{job_id}.txt"
+    job_org = job_skill_analysis_result_json["job_posting_details"].get(
+        "organization", "Unknown"
+    )
+    job_id = job_skill_analysis_result_json["job_posting_details"].get(
+        "job_id", "Unknown"
+    )
+    job_source = job_skill_analysis_result_json["job_posting_details"].get(
+        "job_source", "Unknown"
+    )
+    job_filename = f"{prefix}_{job_source}_{job_org}_{job_id}.txt"
     save_result(crew_result, job_filename)
     return job_filename
 
@@ -416,7 +416,7 @@ if __name__ == "__main__":
     job_analysis = job_skill_analyser_crew(job_description, cache=False)
 
     final_decision = compare_and_decide_crew(
-        resume_analysis.raw, job_analysis.raw, cache=True
+        resume_analysis.raw, job_analysis.raw, cache=False
     )
 
     print(final_decision.raw)

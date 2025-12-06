@@ -42,9 +42,15 @@ currenttimemillis = lambda: int(round(time.time() * 1000))
 
 def extract_json_from_crew_output(crew_output: str) -> dict:
     # find location of : ```json
-    start = crew_output.find("```json") + len("```json")
-    end = crew_output.find("```", start)
-    return json.loads(crew_output[start:end])
+    json_str = ""
+    start = crew_output.find("```json")
+    if start == -1:
+        json_str = crew_output
+    else:
+        start += len("```json")
+        end = crew_output.find("```", start)
+        json_str = crew_output[start:end]
+    return json.loads(json_str)
 
 
 def download_file(url):
@@ -53,14 +59,32 @@ def download_file(url):
         response.raise_for_status()
         return response.content
     except Exception as e:
-        return str(e)
+        raise e
 
 
 def get_text_from_url(url):
     job_description_class = "show-more-less-html__markup"
     bs_obj = BeautifulSoup(download_file(url), "html.parser")
-    job_description = bs_obj.find(class_="show-more-less-html__markup").get_text()
+    try:
+        job_description = bs_obj.find(class_="show-more-less-html__markup").get_text()
+    except Exception as e:
+        try:
+            job_description = bs_obj.get_text()
+        except Exception as e:
+            print(f"Failed to extract text from {url}")
+            raise e
     return job_description
+
+
+def extract_text_from_file(file_path: str) -> str:
+    try:
+        print(f"Extracting text from {file_path}")
+        # Extracts all text from the file
+        with open(file_path, "r") as f:
+            text = f.read()
+        return text
+    except Exception as e:
+        raise e
 
 
 def extract_text_from_file(file_path):
@@ -314,47 +338,32 @@ def extract_text_from_pdf(pdf_path):
 #     return matched_skills
 
 
-def identify_job_source(url: str) -> str:
+def identify_job_source(url: str) -> dict:
     random_id = "".join(random.choices(string.ascii_letters + string.digits, k=10))
+    job_source = {"job_source": "", "job_id": random_id, "job_url": ""}
     if url.startswith("http"):
         print(f"Identifying job source from URL: {url}")
         if "linkedin" in url:
+            print("Source: LinkedIn")
+            job_source["job_source"] = "LinkedIn"
             # example: https://www.linkedin.com/jobs/view/4308118213/?eBP=NON_CHARGEABLE_CHANNEL&refId=G%2BFao3NOlOSc8QUHNxJkvg%3D%3D&trackingId=aHsjCzSeKWJeghtTUZFbcQ%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3BN3X1wCt5SMqWow9PKjAieA%3D%3D&lici=aHsjCzSeKWJeghtTUZFbcQ%3D%3D
             job_id = url.split("/")[5]
-            if job_id == "":
-                job_id = random_id
-                print(f"Job ID not found in URL: {url}. Using random ID: {job_id}")
-                return {
-                    "job_source": "LinkedIn",
-                    "job_id": job_id,
-                    "job_url": "",
-                }
-            return {
-                "job_source": "LinkedIn",
-                "job_id": job_id,
-                "job_url": f"https://www.linkedin.com/jobs/view/{job_id}",
-            }
+            if job_id != "":
+                job_source["job_id"] = job_id
+                job_source["job_url"] = f"https://www.linkedin.com/jobs/view/{job_id}"
+                return job_source
+            return job_source
         elif "indeed" in url:
             # example: https://www.indeed.com/?vjk=ec1c9b9378ad1a8e&advn=4418968771450209
             # get the query parameter vjk using urlparse
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
             job_id = query_params.get("vjk", random_id)
-            if job_id == "":
-                job_id = random_id
-                print(f"Job ID not found in URL: {url}. Using random ID: {job_id}")
-                return {"job_source": "Indeed", "job_id": job_id, "job_url": ""}
-
-            return {
-                "job_source": "Indeed",
-                "job_id": job_id,
-                "job_url": "https://www.indeed.com/?vjk={job_id}",
-            }
-        else:
-            # Generate a random 10-character alphanumeric string
-            return {"job_source": "Unknown", "job_id": random_id}
-    else:
-        return {"job_source": "Unknown", "job_id": random_id}
+            if job_id != "":
+                job_source["job_id"] = job_id
+                job_source["job_url"] = f"https://www.indeed.com/?vjk={job_id}"
+                return job_source
+    return job_source
 
 
 if __name__ == "__main__":

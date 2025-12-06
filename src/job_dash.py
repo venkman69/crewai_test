@@ -22,13 +22,43 @@ st.markdown("Upload your resume and provide a job URL to see how well you match!
 with st.sidebar:
     st.header("Inputs")
     resume_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+    resume_caching = st.checkbox("Caching", key="resume_caching", value=True)
+
     job_url = st.text_input(
         "Job URL", placeholder="https://www.linkedin.com/jobs/view/..."
     )
+    job_text = st.text_area("Job Text", placeholder="Paste job description here")
+
+    job_caching = st.checkbox("Caching", key="job_caching", value=True)
     analyze_button = st.button("Analyze Match")
 
+    st.divider()
+    # show crew .env config items
+    st.markdown("### Crew .env config items:")
+    st.markdown(f"""
+    ```
+    GEMINI_API_KEY: {os.getenv("GEMINI_API_KEY")}
+    CREWAI_TRACING_ENABLED: {os.getenv("CREWAI_TRACING_ENABLED")}
+    CREWAI_STORAGE_DIR: {os.getenv("CREWAI_STORAGE_DIR")}
+    CREWAI_PLATFORM_INTEGRATION_TOKEN: {os.getenv("CREWAI_PLATFORM_INTEGRATION_TOKEN")}
+    ```
+    """)
+    fake_result = st.selectbox("FAKE_RESULT", ["True", "False"], index=1)
+    if fake_result == "True":
+        os.environ["FAKE_RESULT"] = "True"
+    else:
+        os.environ["FAKE_RESULT"] = "False"
+
 if analyze_button:
-    if resume_file is not None and job_url:
+    if resume_file is not None and (job_url or job_text):
+        if job_text:
+            # write to a temp file
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".txt", dir="jobs"
+            ) as tmp_file:
+                tmp_file.write(job_text.encode())
+                tmp_file_path = tmp_file.name
+            job_url = tmp_file_path
         with st.spinner("Analyzing match... This may take a minute."):
             # Save uploaded file to a temporary location
             with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -37,16 +67,37 @@ if analyze_button:
 
             try:
                 # Run the crew
-                result = resume_job_scorer.run_flow(
-                    resume=tmp_file_path, job_description=job_url
+                resume_analysis, resume_analysis_path = (
+                    resume_job_scorer.resume_skill_analyser_crew(
+                        tmp_file_path, resume_caching
+                    )
+                )
+                st.write(
+                    f"Resume analysis is complete. Analysis saved to: {resume_analysis_path}"
+                )
+                job_analysis, job_analysis_path = (
+                    resume_job_scorer.job_skill_analyser_crew(job_url, job_caching)
+                )
+                st.write(
+                    f"Job analysis is complete. Analysis saved to: {job_analysis_path}"
+                )
+                final_decision, final_decision_path = (
+                    resume_job_scorer.compare_and_decide_crew(
+                        resume_analysis.raw, job_analysis.raw, job_caching
+                    )
+                )
+                st.write(
+                    f"Final decision is complete. Decision analysis saved to: {final_decision_path}"
                 )
 
                 # Parse the output
                 try:
-                    result_json = utils.extract_json_from_crew_output(result.raw)
+                    result_json = utils.extract_json_from_crew_output(
+                        final_decision.raw
+                    )
                 except Exception as e:
                     st.error(f"Failed to parse result JSON: {e}")
-                    st.text(result.raw)
+                    st.text(final_decision.raw)
                     st.stop()
 
                 # Display Results
@@ -77,8 +128,18 @@ if analyze_button:
                         unsafe_allow_html=True,
                     )
 
-                    result_log_file_name = resume_job_scorer.save_result(result)
-                    st.caption(f"Analysis log saved to: `{result_log_file_name}`")
+                if "resume_vs_job_decision" in result_json:
+                    decision = result_json["resume_vs_job_decision"]
+                    st.subheader("Resume vs Job Decision")
+                    if decision["decision"] == "Pass":
+                        st.success(
+                            f"Candidate resume is a good fit for the Job! Reason: {decision['reason']}"
+                        )
+                    else:
+                        st.error(
+                            f"Candidate resume is not a good fit for the Job! Reason: {decision['reason']}"
+                        )
+
                 # Score Section
                 if "score" in result_json:
                     score_data = result_json["score"]
