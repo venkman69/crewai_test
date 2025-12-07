@@ -332,8 +332,8 @@ def compare_and_decide_crew(
         inputs={"resume_analysis": resume_analysis, "job_analysis": job_analysis}
     )
     print("Caching result for compare and decide")
-    utils.dc[(resume_analysis, job_analysis)] = result
     save_path = save_job_skill_analysis(result, "final_decision")
+    utils.dc[(resume_analysis, job_analysis)] = (result, save_path)
     return result, save_path
 
 

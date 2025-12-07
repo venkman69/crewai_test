@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 import random
 import string
 from urllib.parse import urlparse, parse_qs
+from datetime import datetime
 
 dc = Cache("work/cache")
 
@@ -101,7 +102,10 @@ def extract_text_from_file(file_path):
 
 def extract_text_from_pdf(pdf_path):
     try:
-        text_file_path = Path("parsed_files") / f"{Path(pdf_path).name}.txt"
+        text_file_path = (
+            Path("parsed_files")
+            / f"{Path(pdf_path).name}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
+        )
         print(f"Extracting text from {pdf_path}")
         # Extracts all text from the PDF file
         text = extract_text(pdf_path)

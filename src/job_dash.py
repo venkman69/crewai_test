@@ -6,6 +6,12 @@ import resume_job_scorer
 from lib import utils
 from dotenv import load_dotenv
 
+# TODO: select a previous uploaded job from jobs.
+# TODO: Move missing skills above the matching skills.
+# TODO: Check for failure to access/download the job url and inform user.
+# TODO: Display the saved crew output files in an expandable section.
+
+
 if os.getenv("GEMINI_API_KEY") is None:
     load_dotenv()
     if os.getenv("GEMINI_API_KEY") is None:
@@ -21,7 +27,22 @@ st.markdown("Upload your resume and provide a job URL to see how well you match!
 # Sidebar for inputs
 with st.sidebar:
     st.header("Inputs")
-    resume_file = st.file_uploader("Upload Resume (PDF)", type=["pdf"])
+    # list last 3 uploaded resumes in ./parsed_files in a dropdown  sort by date newest to oldest
+    st.markdown("### Last 3 Uploaded Resumes")
+    resume_files = os.listdir("./parsed_files")
+    resume_files.sort(
+        key=lambda x: os.path.getmtime(os.path.join("./parsed_files", x)), reverse=True
+    )
+    resume_files = ["Upload Resume (PDF)"] + resume_files[:3]
+    resume_file = st.selectbox("Resume", resume_files, index=0)
+    if resume_file == "Upload Resume (PDF)":
+        resume_file = st.file_uploader(
+            "Upload Resume (PDF or TXT)", type=["pdf", "txt"]
+        )
+        previous_resume = False
+    else:
+        resume_file = os.path.join("./parsed_files", resume_file)
+        previous_resume = True
     resume_caching = st.checkbox("Caching", key="resume_caching", value=True)
 
     job_url = st.text_input(
@@ -61,10 +82,15 @@ if analyze_button:
             job_url = tmp_file_path
         with st.spinner("Analyzing match... This may take a minute."):
             # Save uploaded file to a temporary location
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
-                tmp_file.write(resume_file.getvalue())
-                tmp_file_path = tmp_file.name
-
+            if not previous_resume:
+                resume_file_extension = resume_file.name.split(".")[-1]
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=f".{resume_file_extension}"
+                ) as tmp_file:
+                    tmp_file.write(resume_file.getvalue())
+                    tmp_file_path = tmp_file.name
+            else:
+                tmp_file_path = resume_file
             try:
                 # Run the crew
                 resume_analysis, resume_analysis_path = (
@@ -247,10 +273,6 @@ if analyze_button:
 
             except Exception as e:
                 st.error(f"An error occurred during analysis: {e}")
-            finally:
-                # Clean up temporary file
-                if os.path.exists(tmp_file_path):
-                    os.remove(tmp_file_path)
 
     else:
         st.warning("Please upload a resume and provide a job URL.")
