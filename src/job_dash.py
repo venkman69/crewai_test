@@ -112,8 +112,8 @@ if analyze_button:
                 job_analysis, job_analysis_path = (
                     resume_job_scorer.job_skill_analyser_crew(job_url, job_caching)
                 )
-                st.write(
-                    f"Job analysis is complete. Analysis saved to: {job_analysis_path}"
+                st.success(
+                    f"**Job analysis complete!**\n\nAnalysis saved to: `{job_analysis_path}`"
                 )
             with st.spinner("Deciding..."):
                 final_decision, final_decision_path = (
@@ -121,8 +121,8 @@ if analyze_button:
                         resume_analysis.raw, job_analysis.raw, job_caching
                     )
                 )
-                st.write(
-                    f"Final decision is complete. Decision analysis saved to: {final_decision_path}"
+                st.success(
+                    f"**Final decision complete!**\n\nDecision analysis saved to: `{final_decision_path}`"
                 )
 
             # Parse the output
