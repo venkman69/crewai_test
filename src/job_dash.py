@@ -25,15 +25,22 @@ st.set_page_config(page_title="Resume Job Scorer", layout="wide")
 st.title("Resume Job Scorer")
 st.markdown("Upload your resume and provide a job URL to see how well you match!")
 
-# Sidebar for inputs
-with st.sidebar:
-    st.header("Inputs")
-    # list last 3 uploaded resumes in ./parsed_files in a dropdown  sort by date newest to oldest
-    st.markdown("### Last 3 Uploaded Resumes")
+
+def rescan_resume_folder():
     resume_files = os.listdir("./parsed_files")
     resume_files.sort(
         key=lambda x: os.path.getmtime(os.path.join("./parsed_files", x)), reverse=True
     )
+    return resume_files
+
+
+# Sidebar for inputs
+with st.sidebar:
+    # list last 3 uploaded resumes in ./parsed_files in a dropdown  sort by date newest to oldest
+    if st.button("Rescan Resume Folder"):
+        resume_files = rescan_resume_folder()
+    else:
+        resume_files = rescan_resume_folder()
     resume_files = ["Upload Resume (PDF)"] + resume_files[:3]
     resume_file = st.selectbox("Resume", resume_files, index=0)
     if resume_file == "Upload Resume (PDF)":
@@ -56,20 +63,6 @@ with st.sidebar:
 
     st.divider()
     # show crew .env config items
-    st.markdown("### Crew .env config items:")
-    st.markdown(f"""
-    ```
-    GEMINI_API_KEY: {os.getenv("GEMINI_API_KEY")}
-    CREWAI_TRACING_ENABLED: {os.getenv("CREWAI_TRACING_ENABLED")}
-    CREWAI_STORAGE_DIR: {os.getenv("CREWAI_STORAGE_DIR")}
-    CREWAI_PLATFORM_INTEGRATION_TOKEN: {os.getenv("CREWAI_PLATFORM_INTEGRATION_TOKEN")}
-    ```
-    """)
-    fake_result = st.selectbox("FAKE_RESULT", ["True", "False"], index=1)
-    if fake_result == "True":
-        os.environ["FAKE_RESULT"] = "True"
-    else:
-        os.environ["FAKE_RESULT"] = "False"
 
 if analyze_button:
     if resume_file is not None and (job_url or job_text):

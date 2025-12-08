@@ -13,10 +13,21 @@ gemini_api_key = os.getenv("GEMINI_API_KEY")
 
 # Use Gemini 2.5 Pro Experimental model
 gemini_llm = LLM(
-    model="gemini/gemini-2.5-flash",
+    model="gemini/gemini-2.5-flash-lite",
     api_key=gemini_api_key,
     temperature=0.0,  # Lower temperature for more consistent results.
 )
+ollama_llm = LLM(
+    model="ollama/mistral",
+    base_url="http://localhost:11434",
+)
+
+openai_llm = LLM(
+    model="openai/gpt-4o",
+    api_key=os.getenv("OPENAI_API_KEY"),
+)
+
+llm_choice = gemini_llm
 
 
 class TextExtractor(BaseTool):
@@ -37,7 +48,7 @@ class TextExtractor(BaseTool):
                 return utils.get_text_from_url(text_source)
             else:
                 return text_source
-        except Exception as e:
+        except Exception:
             # exception is thrown if it is already text and Path will throw an exception
             print("Assuming the text source is already raw text")
             return text_source
@@ -58,7 +69,7 @@ resume_text_extractor_agent = Agent(
     role="Resume Text extractor",
     goal="""Extract the text from the file or string provided.""",
     backstory="""You are a text extractor and can process raw text, urls, text files and PDFs.""",
-    llm=gemini_llm,
+    llm=llm_choice,
     tools=[text_extractor],
     verbose=True,
     allow_delegation=False,
@@ -68,7 +79,7 @@ resume_skill_analyzer_agent = Agent(
     role="Resume skill analyzer",
     goal="""Extract the skills from the file or string. """,
     backstory="""You are an expert HR professional specializing in identifying skills within a resume.""",
-    llm=gemini_llm,
+    llm=llm_choice,
     verbose=True,
     allow_delegation=False,
     memory=True,
@@ -93,7 +104,7 @@ job_text_extractor_agent = Agent(
     goal="""Extract the text from the file, url or string from provided input. """,
     backstory="""You are a text extractor and can process raw text, urls, text files and PDFs.
     You can also identify the source of a URL and identify a reconstructable job url and ability to create filename.""",
-    llm=gemini_llm,
+    llm=llm_choice,
     tools=[text_extractor, job_source_identifier],
     verbose=True,
     allow_delegation=False,
@@ -122,7 +133,7 @@ job_skill_analyzer_agent = Agent(
     backstory="""You are an expert HR professional specializing in identifying skills 
     within a job description. You can also extract the organization name from the job description.
     """,
-    llm=gemini_llm,
+    llm=llm_choice,
     verbose=True,
     allow_delegation=False,
     memory=True,
@@ -157,7 +168,7 @@ job_vs_resume_skill_matching_agent = Agent(
     goal="""Review the job skills and candidate skills and assign a score.""",
     backstory="""You are an expert HR professional who can determine how a candidate skills match the required and preferred skills in a job description
     """,
-    llm=gemini_llm,
+    llm=llm_choice,
     verbose=True,
     allow_delegation=False,
     memory=True,
@@ -225,7 +236,7 @@ resume_vs_job_decision_agent = Agent(
     backstory="""You are an expert HR professional who can decide whether a candidate passes
     to the next stage of the hiring process or not.
     """,
-    llm=gemini_llm,
+    llm=llm_choice,
     verbose=True,
     allow_delegation=False,
     memory=True,
@@ -264,6 +275,8 @@ def resume_skill_analyser_crew(
 ) -> tuple[CrewOutput, str]:
     # get the resume text
     resume_text = text_extractor.run(resume_url_or_text)
+    # append that I am a citizen of the United States
+    resume_text += "\nI am a citizen of the United States"
     if cache and resume_text in utils.dc:
         print(f"Returning cached result for resume {resume_url_or_text[:100]}...")
         return utils.dc[resume_text]
@@ -277,7 +290,10 @@ def resume_skill_analyser_crew(
         process=Process.sequential,
         verbose=True,
     )
+    start = utils.currenttimemillis()
     result = resume_crew.kickoff(inputs={"resume_url_or_text": resume_text})
+    end = utils.currenttimemillis()
+    print(f"Resume skill analysis took {end - start} ms")
     print("Caching result for resume")
     save_path = save_resume_skill_analysis(result)
     utils.dc[resume_text] = result, save_path
@@ -301,9 +317,12 @@ def job_skill_analyser_crew(job_url: str, cache: bool = True) -> tuple[CrewOutpu
         process=Process.sequential,
         verbose=True,
     )
+    start = utils.currenttimemillis()
     result = job_crew.kickoff(
         inputs={"job_text": job_text, "job_details": json.dumps(job_details)}
     )
+    end = utils.currenttimemillis()
+    print(f"Job skill analysis took {end - start} ms")
     print("Caching result for job")
     save_path = save_job_skill_analysis(result, "job_skill_analysis")
     utils.dc[job_text] = (result, save_path)
@@ -328,25 +347,16 @@ def compare_and_decide_crew(
         process=Process.sequential,
         verbose=True,
     )
+    start = utils.currenttimemillis()
     result = compare_and_decide_crew.kickoff(
         inputs={"resume_analysis": resume_analysis, "job_analysis": job_analysis}
     )
+    end = utils.currenttimemillis()
+    print(f"Compare and decide took {end - start} ms")
     print("Caching result for compare and decide")
     save_path = save_job_skill_analysis(result, "final_decision")
     utils.dc[(resume_analysis, job_analysis)] = (result, save_path)
     return result, save_path
-
-
-class FakeResult:
-    def __init__(self, raw: str = ""):
-        if raw != "":
-            self.raw = raw
-        else:
-            if Path("fake_result_data.txt").exists():
-                with open("fake_result_data.txt", "r") as f:
-                    self.raw = f.read()
-            else:
-                self.raw = ""
 
 
 def save_job_skill_analysis(crew_result: CrewOutput, prefix: str):
@@ -383,8 +393,6 @@ def save_resume_skill_analysis(crew_result: CrewOutput):
 
 
 def save_result(crew_result: CrewOutput, file_name: str):
-    if isinstance(crew_result, FakeResult):
-        return "logs/fake_result.txt"
     with open(f"logs/{file_name}", "w") as f:
         for i, task_output in enumerate(crew_result.tasks_output):
             f.write(f"-------------- {task_output.agent} --------------\n")
@@ -409,14 +417,19 @@ if __name__ == "__main__":
     # read from command line prompt:
     job_description = input("Enter job URL: ")
 
-    resume_analysis = resume_skill_analyser_crew(
+    resume_analysis, resume_analysis_save_path = resume_skill_analyser_crew(
         "/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf",
         cache=True,
     )
-    job_analysis = job_skill_analyser_crew(job_description, cache=False)
+    job_analysis, job_analsys_save_path = job_skill_analyser_crew(
+        job_description, cache=False
+    )
 
-    final_decision = compare_and_decide_crew(
+    final_decision, final_decision_save_path = compare_and_decide_crew(
         resume_analysis.raw, job_analysis.raw, cache=False
     )
 
     print(final_decision.raw)
+    print(f"Resume analysis saved to {resume_analysis_save_path}")
+    print(f"Job analysis saved to {job_analsys_save_path}")
+    print(f"Final decision saved to {final_decision_save_path}")

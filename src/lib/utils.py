@@ -357,12 +357,21 @@ def identify_job_source(url: str) -> dict:
         elif "indeed" in url:
             # example: https://www.indeed.com/?vjk=ec1c9b9378ad1a8e&advn=4418968771450209
             # get the query parameter vjk using urlparse
+            job_source["job_source"] = "Indeed"
             parsed_url = urlparse(url)
             query_params = parse_qs(parsed_url.query)
             job_id = query_params.get("vjk", random_id)
             if job_id != "":
                 job_source["job_id"] = job_id
                 job_source["job_url"] = f"https://www.indeed.com/?vjk={job_id}"
+                return job_source
+        elif "dice" in url:
+            # example: https://www.dice.com/job-detail/6ab2ae92-d73e-4670-a846-a033cc1ac6b2
+            job_id = url.split("/")[4]
+            job_source["job_source"] = "Dice"
+            if job_id != "":
+                job_source["job_id"] = job_id
+                job_source["job_url"] = f"https://www.dice.com/job-detail/{job_id}"
                 return job_source
     return job_source
 
