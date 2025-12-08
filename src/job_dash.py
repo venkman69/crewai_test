@@ -103,9 +103,10 @@ if analyze_button:
                         tmp_file_path, resume_caching
                     )
                 )
-                st.markdown(
-                    f"""Resume analysis is complete.<br>Analysis saved to: {resume_analysis_path}
-                    <br>Resume stored as text file:./parsed_files/{resume_parsed_filename}.txt"""
+                st.success(
+                    f"**Resume analysis complete!**\n\n"
+                    f"Analysis saved to: `{resume_analysis_path}`\n\n"
+                    f"Resume stored as: `./parsed_files/{resume_parsed_filename}.txt`"
                 )
             with st.spinner("Analysing job..."):
                 job_analysis, job_analysis_path = (
