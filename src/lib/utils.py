@@ -102,10 +102,7 @@ def extract_text_from_file(file_path):
 
 def extract_text_from_pdf(pdf_path):
     try:
-        text_file_path = (
-            Path("parsed_files")
-            / f"{Path(pdf_path).name}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.txt"
-        )
+        text_file_path = Path("parsed_files") / f"{Path(pdf_path).name}.txt"
         print(f"Extracting text from {pdf_path}")
         # Extracts all text from the PDF file
         text = extract_text(pdf_path)
