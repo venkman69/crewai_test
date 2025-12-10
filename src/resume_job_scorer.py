@@ -11,8 +11,15 @@ import datetime
 # Read your API key from the environment variable
 gemini_api_key = os.getenv("GEMINI_API_KEY")
 
-# Use Gemini 2.5 Pro Experimental model
-gemini_llm = LLM(
+# list of free tier rates:
+# gemini/gemini-2.5-flash-lite: RPD=20, RPM=10, TPM=250K
+# gemini/gemini-2.5-flash:      RPD=20, RPM=5,  TPM=250K
+gemini_flash_llm = LLM(
+    model="gemini/gemini-2.5-flash",
+    api_key=gemini_api_key,
+    temperature=0.0,  # Lower temperature for more consistent results.
+)
+gemini_flash_lite_llm = LLM(
     model="gemini/gemini-2.5-flash-lite",
     api_key=gemini_api_key,
     temperature=0.0,  # Lower temperature for more consistent results.
@@ -25,9 +32,17 @@ ollama_llm = LLM(
 openai_llm = LLM(
     model="openai/gpt-4o",
     api_key=os.getenv("OPENAI_API_KEY"),
+    temperature=0.0,  # Lower temperature for more consistent results.
 )
-
-llm_choice = gemini_llm
+llm_dict = {
+    "gemini_flash": gemini_flash_llm,
+    "gemini_flash_lite": gemini_flash_lite_llm,
+    "ollama": ollama_llm,
+    "openai": openai_llm,
+}
+llm_choice_name = "gemini_flash_lite"
+print(f"Using LLM: {llm_choice_name}")
+llm_choice = llm_dict[llm_choice_name]
 
 
 class TextExtractor(BaseTool):
@@ -85,48 +100,17 @@ resume_skill_analyzer_agent = Agent(
     memory=True,
 )
 resume_skill_analyzer_task = Task(
-    description="""Extract the skills and years of work experience from the resume raw string data within {resume_url_or_text}
-    work experience is overall number of years from the first job to the last job and round up.
-    In addition, extract the name and contact information from the resume.""",
+    description="""Extract the skills and years of work experience from the resume raw string data within resume text.
+    work experience is overall number of years from the start date of the first job to the end date of the last job and round up.
+    Resume Text is provided as below: {resume_text}""",
     agent=resume_skill_analyzer_agent,
-    expected_output="""Output should be in JSON format, 
+    expected_output="""Output MUST be just the JSON object, 
     for example : 
         {
             "resume_skills":["Python","WAF","Jira"], 
             "years_of_experience":5,
-            "name":"John Doe",
-            "email":"john.doe@example.com",
-            "phone":"123-456-7890"
         }""",
 )
-job_text_extractor_agent = Agent(
-    role="Job Text extractor",
-    goal="""Extract the text from the file, url or string from provided input. """,
-    backstory="""You are a text extractor and can process raw text, urls, text files and PDFs.
-    You can also identify the source of a URL and identify a reconstructable job url and ability to create filename.""",
-    llm=llm_choice,
-    tools=[text_extractor, job_source_identifier],
-    verbose=True,
-    allow_delegation=False,
-    memory=True,
-)
-job_text_extraction_task = Task(
-    description="""Extract the text from the job description from {job_posting_url_or_string}.""",
-    agent=job_text_extractor_agent,
-    expected_output="""Output should be in JSON format, 
-    for example : 
-        {
-            "job_description":"Job description text",
-            "job_posting_details":
-            {
-                "job_source": "Indeed", 
-                "job_id": job_id, 
-                "job_url": "https://www.indeed.com/viewjob?jk=1234567890"
-            }
-        }
-    """,
-)
-
 job_skill_analyzer_agent = Agent(
     role="Job skill analyzer",
     goal="""Extract the skills from the job description. """,
@@ -139,14 +123,19 @@ job_skill_analyzer_agent = Agent(
     memory=True,
 )
 job_skill_analyzer_task = Task(
-    description="""Extract the organization name, summary of the role, years of industry experience, and skills from provided inputs in: job_text:{job_text} and job_details:{job_details}.
+    description="""Extract:
+    * organization name, 
+    * summary of the role, 
+    * years of industry experience,
+    * and skills categorized into required and preferred.
+    from provided inputs in: job_text:{job_text} and job_posting_details:{job_posting_details}.
     Skills should be categorized into required and preferred.
     if a particular skill mentions a minimum years of experience, 
     then represent it within brackets for example "Python (2 years)".
-    Add the job_details to the output.
+    Add the job_posting_details to the output.
     Add the organization name and years of experience to the job_posting_details.""",
     agent=job_skill_analyzer_agent,
-    expected_output="""Output should be in JSON format, 
+    expected_output="""Output MUST be just the JSON object, 
     for example : 
         {
             "required_skills":["Python (2 years)","WAF"],
@@ -175,7 +164,6 @@ job_vs_resume_skill_matching_agent = Agent(
 )
 job_vs_resume_skill_matching_task = Task(
     description="""Identify a match score for the job and candidate skills contained within the JSON formatted strings.
-    Job skils are in: {job_analysis} and candi date skills are in: {resume_analysis}
     Compare the required and preferred skills for the job with the candidate skills and assign a score.
     Use this criteria to calculate the score:
     1. Calculate 'required_skill_match_score': Count the number of required skills in the job that are present in the candidate and divide by the total number of required skills in the job to get the required skill match score.
@@ -199,6 +187,7 @@ job_vs_resume_skill_matching_task = Task(
         in the resume with the minimum years of experience in the job description. if the years of experience 
         in the resume is less than the minimum years of experience in the job description then consider 
         it as a missing skill.
+    Job skils are in: {job_analysis} and candidate skills are in: {resume_analysis}
     
     """,
     agent=job_vs_resume_skill_matching_agent,
@@ -226,6 +215,84 @@ job_vs_resume_skill_matching_task = Task(
                 "total_required_skills_count": 30,
                 "total_preferred_skills_count": 11
             }
+        }""",
+)
+job_vs_resume_skill_matching_agent_v2 = Agent(
+    role="HR Expert who can review the job description, then extract required and preferred skills and compare with candidate skills and assign a score",
+    goal="""Review the job skills and candidate skills and assign a score.""",
+    backstory="""You are an expert HR professional who can determine how a candidate skills match the required and preferred skills in a job description
+    """,
+    llm=llm_choice,
+    verbose=True,
+    allow_delegation=False,
+    memory=True,
+)
+
+job_vs_resume_skill_matching_task_v2 = Task(
+    description="""# Goal:
+    Review the job description, then extract required and preferred skills and compare with candidate skills and assign a score.
+    ## Job data extraction:
+    You will extract the following information from the job description:
+    * organization name,
+    * summary of the role,
+    * years of industry experience,
+    * and skills categorized into required and preferred.
+
+    ## Use this criteria to calculate the score:
+    1. Calculate 'required_skill_match_score': Count the number of required skills in the job that are present in the candidate and divide by the total number of required skills in the job to get the required skill match score.
+    2. Calculate 'preferred_skill_match_score': Count the number of preferred skills in the job that are present in the candidate and divide by the total number of preferred skills in the job to get the preferred skill match score.
+    3. Calculate 'final_score': Final score = required_skill_match_score * 0.7 + preferred_skill_match_score * 0.3  
+    for example if job has 10 required skills and 5 preferred skills and 
+       candidate has 8 required skills and 3 preferred skills then final score = 8/10 * 0.7 + 3/5 * 0.3 = 0.74
+    4. Score data should be presented as keys in JSON output as below:
+       a. A tag named "score" which is a dictionary with the following keys:
+          i. final_score
+          ii. required_skill_match_score
+          iii. preferred_skill_match_score
+          iv. matching_required_skills_count, 
+          v. missing_required_skills_count, 
+          vi. matching_preferred_skills_count, 
+          vii. missing_preferred_skills_count, 
+          viii. total_required_skills_count,
+          ix.  total_preferred_skills_count, 
+    ## Comparison guidance for candidate skills vs job requirements: 
+    1. Look at the required missing skills, if any of the following appear then candidate will not pass:
+        a. Active Security Clearance.
+        b. Specific certifications that are required.
+        c. If a skill mentions a minimum years of experience, then compare 
+    2. If the candidate does not fail due to any of the above criteria, and the final score is above 70%,
+    then the decision should be "Pass" and the reason should be "Score is above 70% and candidate has sufficient skills and years of experience".
+    Otherwise the decision should be "Fail" along with the appropriate reason(s).
+    3. Provide the final decision and reason in the output.
+
+    # Inputs: 
+    * Job description is in: {job_text} 
+    * Candidate skills are in JSON format within the resume analysis: {resume_analysis}
+    """,
+    agent=job_vs_resume_skill_matching_agent,
+    expected_output="""Output MUST be just the JSON object, 
+    for example : 
+        {
+            "matching_required_skills":["Java","Python"], 
+            "missing_required_skills":["Ruby", "TOGAF"], 
+            "matching_preferred_skills":["CISSP","WAF"],
+            "missing_preferred_skills":["Jira","management"],
+            "score": {
+                "final_score": 0.7633,
+                "required_skill_match_score": 0.8333,
+                "preferred_skill_match_score": 0.60,
+                "matching_required_skills_count": 20,
+                "missing_required_skills_count": 4,
+                "matching_preferred_skills_count": 6,
+                "missing_preferred_skills_count": 4,
+                "total_required_skills_count": 24,
+                "total_preferred_skills_count": 10
+            }
+            "organization":"Google",
+            "years_of_experience":5,
+            "job_summary":"Role summary text",
+            "decision":"Pass",
+            "reason":"Score is above 70% and candidate has sufficient skills and years of experience",
         }""",
 )
 
@@ -271,13 +338,17 @@ resume_vs_job_decision_task = Task(
 
 
 def resume_skill_analyser_crew(
-    resume_url_or_text: str, cache: bool = True
+    resume_url_or_text: str, get_from_cache: bool = True
 ) -> tuple[CrewOutput, str]:
     # get the resume text
     resume_text = text_extractor.run(resume_url_or_text)
     # append that I am a citizen of the United States
     resume_text += "\nI am a citizen of the United States"
-    if cache and resume_text in utils.dc:
+    # extract name, email, phone number from resume text
+    candidate_info = utils.nlp_parse_resume_get_name_email_phone(resume_text)
+    print(candidate_info)
+
+    if get_from_cache and resume_text in utils.dc:
         print(f"Returning cached result for resume {resume_url_or_text[:100]}...")
         return utils.dc[resume_text]
     resume_crew = Crew(
@@ -291,16 +362,16 @@ def resume_skill_analyser_crew(
         verbose=True,
     )
     start = utils.currenttimemillis()
-    result = resume_crew.kickoff(inputs={"resume_url_or_text": resume_text})
+    result = resume_crew.kickoff(inputs={"resume_text": resume_text})
     end = utils.currenttimemillis()
     print(f"Resume skill analysis took {end - start} ms")
     print("Caching result for resume")
-    save_path = save_resume_skill_analysis(result)
+    save_path = save_resume_skill_analysis(resume_crew, result, candidate_info)
     utils.dc[resume_text] = result, save_path
     return result, save_path
 
 
-def job_skill_analyser_crew(job_url: str, cache: bool = True) -> tuple[CrewOutput, str]:
+def job_skill_analyzer_crew(job_url: str, cache: bool = True) -> tuple[CrewOutput, str]:
     # get the job text
     job_text = text_extractor.run(job_url)
     job_details = job_source_identifier.run(job_url)
@@ -319,12 +390,12 @@ def job_skill_analyser_crew(job_url: str, cache: bool = True) -> tuple[CrewOutpu
     )
     start = utils.currenttimemillis()
     result = job_crew.kickoff(
-        inputs={"job_text": job_text, "job_details": json.dumps(job_details)}
+        inputs={"job_text": job_text, "job_posting_details": json.dumps(job_details)}
     )
     end = utils.currenttimemillis()
     print(f"Job skill analysis took {end - start} ms")
     print("Caching result for job")
-    save_path = save_job_skill_analysis(result, "job_skill_analysis")
+    save_path = save_job_skill_analysis(job_crew, result, "job_skill_analysis")
     utils.dc[job_text] = (result, save_path)
     return result, save_path
 
@@ -354,46 +425,89 @@ def compare_and_decide_crew(
     end = utils.currenttimemillis()
     print(f"Compare and decide took {end - start} ms")
     print("Caching result for compare and decide")
-    save_path = save_job_skill_analysis(result, "final_decision")
+    save_path = save_job_skill_analysis(
+        compare_and_decide_crew, result, "final_decision"
+    )
     utils.dc[(resume_analysis, job_analysis)] = (result, save_path)
     return result, save_path
 
 
-def save_job_skill_analysis(crew_result: CrewOutput, prefix: str):
+def job_analysis_and_decision_crew(
+    job_url: str, resume_output: CrewOutput, get_from_cache: bool = True
+) -> tuple[CrewOutput, str]:
+    # get the job text
+    job_text = text_extractor.run(job_url)
+    job_details = job_source_identifier.run(job_url)
+    resume_analysis = resume_output.raw
+    if get_from_cache and (resume_analysis, job_text) in utils.dc:
+        print("Returning cached result for compare and decide")
+        return utils.dc[(resume_analysis, job_text)]
+    job_crew = Crew(
+        agents=[
+            job_vs_resume_skill_matching_agent_v2,
+        ],
+        tasks=[
+            job_vs_resume_skill_matching_task_v2,
+        ],
+        process=Process.sequential,
+        verbose=True,
+    )
+    start = utils.currenttimemillis()
+    result = job_crew.kickoff(
+        inputs={"job_text": job_text, "resume_analysis": resume_analysis}
+    )
+    end = utils.currenttimemillis()
+    print(f"Job vs Resume skill matching took {end - start} ms")
+    print("Caching result for job")
+    save_path = save_job_skill_analysis(job_crew, result, job_details, "job_vs_resume")
+    utils.dc[(resume_analysis, job_text)] = (result, save_path)
+    return result, save_path
+    pass
+
+
+def save_job_skill_analysis(
+    crew_object: Crew, crew_result: CrewOutput, job_details: dict, prefix: str
+):
     print(f"Writing {prefix} task output")
     os.makedirs("logs", exist_ok=True)
     job_skill_analysis_result_json = utils.extract_json_from_crew_output(
         crew_result.raw
     )
-    job_org = job_skill_analysis_result_json["job_posting_details"].get(
-        "organization", "Unknown"
-    )
-    job_id = job_skill_analysis_result_json["job_posting_details"].get(
-        "job_id", "Unknown"
-    )
-    job_source = job_skill_analysis_result_json["job_posting_details"].get(
-        "job_source", "Unknown"
-    )
+    job_org = job_skill_analysis_result_json.get("organization", "Unknown")
+    # job_source = {"job_source": "", "job_id": random_id, "job_url": ""}
+    job_id = job_details.get("job_id", "Unknown")
+    job_source = job_details.get("job_source", "Unknown")
+    job_org = job_org.replace(" ", "_")
+    job_id = job_id.replace(" ", "_")
+    job_source = job_source.replace(" ", "_")
     job_filename = f"{prefix}_{job_source}_{job_org}_{job_id}.txt"
-    save_result(crew_result, job_filename)
+    save_result(crew_object, crew_result, job_filename, job_details)
     return job_filename
 
 
-def save_resume_skill_analysis(crew_result: CrewOutput):
+def save_resume_skill_analysis(
+    crew_object: Crew, crew_result: CrewOutput, candidate_info: dict
+):
     print("Writing Resume task outputs to files")
     os.makedirs("logs", exist_ok=True)
     resume_skill_analysis_result_json = utils.extract_json_from_crew_output(
         crew_result.raw
     )
-    candidate_name = resume_skill_analysis_result_json["name"].replace(" ", "_")
+    candidate_name = candidate_info.get("name", "Unknown").replace(" ", "_")
     datestr = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     resume_analysis_filename = f"resume_skills_analysis_{candidate_name}_{datestr}.txt"
-    save_result(crew_result, resume_analysis_filename)
+    save_result(crew_object, crew_result, resume_analysis_filename)
     return resume_analysis_filename
 
 
-def save_result(crew_result: CrewOutput, file_name: str):
+def save_result(
+    crew_object: Crew, crew_result: CrewOutput, file_name: str, job_details: dict = None
+):
     with open(f"logs/{file_name}", "w") as f:
+        f.write("Crew Statistics\n")
+        f.write(json.dumps(crew_object.usage_metrics.__dict__, indent=4))
+        f.write("\n")
+        f.write("---------\n")
         for i, task_output in enumerate(crew_result.tasks_output):
             f.write(f"-------------- {task_output.agent} --------------\n")
             f.write(f"Description:\n{task_output.description}\n")
@@ -402,7 +516,19 @@ def save_result(crew_result: CrewOutput, file_name: str):
                 f.write(f"{mesg['role']}: {mesg['content']}\n")
             f.write(f"Raw:\n{task_output.raw}\n")
             f.write("\n")
+        if job_details:
+            f.write("Job Details\n")
+            f.write(json.dumps(job_details, indent=4))
+            f.write("\n")
     return file_name
+
+
+def scan_parsed_files_dir():
+    resume_files = os.listdir("./parsed_files")
+    resume_files.sort(
+        key=lambda x: os.path.getmtime(os.path.join("./parsed_files", x)), reverse=True
+    )
+    return resume_files
 
 
 if __name__ == "__main__":
@@ -414,22 +540,52 @@ if __name__ == "__main__":
     # print("--- Crew Execution Finished ---")
     # save_result(complete_flow_result)
 
+    # pick the newest file from resume folder
+    # pick google drive file first
+    if Path(
+        "/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf"
+    ).exists():
+        resume = (
+            "/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf"
+        )
+    else:
+        print(
+            "** Cannot access google drive file **, checking the parsed_files directory instead"
+        )
+        resumes = scan_parsed_files_dir()
+        if len(resumes) == 0:
+            print("No resumes found in parsed_files directory")
+            exit(1)
+        resume = "./parsed_files/" + resumes[0]
+    print(f"Using resume: {resume}")
+
     # read from command line prompt:
-    job_description = input("Enter job URL: ")
-
+    # job_description = input("Enter job URL: ")
+    job_url = "https://www.linkedin.com/jobs/view/4313406950"
+    job_url = "https://www.linkedin.com/jobs/view/4247854309"
+    job_url = "https://www.linkedin.com/jobs/view/4305691847"
+    job_url = "https://www.linkedin.com/jobs/view/4287186320"
+    job_url = "https://jobs.baesystems.com/global/en/job/BAE1US115615BREXTERNAL/Chief-Engineer-Cyber-IT-Program?utm_source=linkedin&utm_medium=phenom-feeds"
+    job_url = "https://www.linkedin.com/jobs/view/4323936609"
     resume_analysis, resume_analysis_save_path = resume_skill_analyser_crew(
-        "/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf",
-        cache=True,
+        resume,
+        get_from_cache=True,
     )
-    job_analysis, job_analsys_save_path = job_skill_analyser_crew(
-        job_description, cache=False
-    )
+    # job_analysis, job_analsys_save_path = job_skill_analyzer_crew(
+    #     job_url, get_from_cache=True
+    # )
 
-    final_decision, final_decision_save_path = compare_and_decide_crew(
-        resume_analysis.raw, job_analysis.raw, cache=False
-    )
+    # final_decision, final_decision_save_path = compare_and_decide_crew(
+    #     resume_analysis.raw, job_analysis.raw, get_from_cache=True
+    # )
 
-    print(final_decision.raw)
-    print(f"Resume analysis saved to {resume_analysis_save_path}")
-    print(f"Job analysis saved to {job_analsys_save_path}")
-    print(f"Final decision saved to {final_decision_save_path}")
+    # print(final_decision.raw)
+    # print(f"Resume analysis saved to {resume_analysis_save_path}")
+    # print(f"Job analysis saved to {job_analsys_save_path}")
+    # print(f"Final decision saved to {final_decision_save_path}")
+
+    job_analysis, job_analysis_save_path = job_analysis_and_decision_crew(
+        job_url, resume_analysis, get_from_cache=True
+    )
+    print(job_analysis.raw)
+    print(f"Job analysis saved to {job_analysis_save_path}")
