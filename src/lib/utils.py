@@ -17,27 +17,24 @@ import random
 import string
 from urllib.parse import urlparse, parse_qs
 from datetime import datetime
+from google import genai
+import spacy
+from spacy.matcher import Matcher
+from spacy.cli import download
+from markdownify import markdownify as md
+
+# TODO: Implement playwright in downloading from URL
 
 dc = Cache("work/cache")
-
-GENERIC_STOP_WORDS = {
-    "experience",
-    "candidate",
-    "ability",
-    "knowledge",
-    "years",
-    "work",
-    "team",
-    "role",
-    "requirements",
-    "responsibilities",
-    "degree",
-    "skills",
-    "environment",
-    "projects",
-    "company",
-    "opportunity",
-}
+spacy_data_model = "en_core_web_lg"
+try:
+    nlp = spacy.load(spacy_data_model)
+except Exception as e:
+    try:
+        download(spacy_data_model)
+        nlp = spacy.load(spacy_data_model)
+    except Exception as e:
+        raise e
 currenttimemillis = lambda: int(round(time.time() * 1000))
 
 
@@ -55,22 +52,27 @@ def extract_json_from_crew_output(crew_output: str) -> dict:
 
 
 def download_file(url):
+    if url in dc:
+        return dc[url]
     try:
         response = requests.get(url)
         response.raise_for_status()
+        dc[url] = response.content
         return response.content
     except Exception as e:
         raise e
 
 
 def get_text_from_url(url):
-    job_description_class = "show-more-less-html__markup"
+    linkedin_job_description_class = "show-more-less-html__markup"
     bs_obj = BeautifulSoup(download_file(url), "html.parser")
     try:
-        job_description = bs_obj.find(class_="show-more-less-html__markup").get_text()
+        job_description = md(str(bs_obj.find(class_=linkedin_job_description_class)))
+        if job_description is None or job_description == "":
+            job_description = md(str(bs_obj))
     except Exception as e:
         try:
-            job_description = bs_obj.get_text()
+            job_description = md(str(bs_obj))
         except Exception as e:
             print(f"Failed to extract text from {url}")
             raise e
@@ -88,7 +90,7 @@ def extract_text_from_file(file_path: str) -> str:
         raise e
 
 
-def extract_text_from_file(file_path):
+def extract_clean_text_from_file(file_path):
     try:
         print(f"Extracting text from {file_path}")
         # Extracts all text from the file
@@ -120,48 +122,125 @@ def extract_text_from_pdf(pdf_path):
 # initialize matcher with a vocab
 
 
-# def extract_name(resume_text):
-#     """Extracts the name of a person from resume text using pattern matching."""
-#     # Pre-process the text to remove extra whitespace and newlines
-#     cleaned_text = " ".join(resume_text[:200].split())
-#     doc = nlp(cleaned_text)
-#     matcher = Matcher(nlp.vocab)
+def nlp_extract_organization_name(job_text: str) -> list[str]:
+    """
+    Extracts the primary organization name by searching for common header phrases
+    and applying targeted NER to the following text segment.
+    """
+    # 1. Define common introductory headers
+    headers = [
+        r"^(About Us:?)$",
+        r"^(Company Description:?)$",
+        r"^(Who We Are:?)$",
+        r"^(Overview:?)$",
+    ]
+    # Create a single regex pattern to find these headers (case-insensitive and multiline)
+    header_pattern = "|".join(headers)
 
-#     # Pattern to find two consecutive proper nouns (FirstName LastName)
-#     pattern = [{"POS": "PROPN"}, {"POS": "PROPN"}]
-#     matcher.add("NAME", [pattern])
-#     matches = matcher(doc)
+    search_start = 0
+    match_segment = ""
 
-#     # Return the first match found
-#     if matches:
-#         return doc[matches[0][1] : matches[0][2]].text.strip()
-#     return None
+    # 2. Search for the header in the text
+    # re.IGNORECASE makes it work for "about us", "About Us", "ABOUT US", etc.
+    header_match = re.search(header_pattern, job_text, re.MULTILINE | re.IGNORECASE)
+
+    if header_match:
+        # If a header is found, set the search starting point right after it.
+        # This is where the company's self-description begins.
+        search_start = header_match.end()
+
+        # Take the text from the end of the header up to the next 150 characters
+        # to focus the NER on the most relevant section.
+        match_segment = job_text[search_start : search_start + 150].strip()
+        print(
+            f"DEBUG: Found header at index {search_start}. Segment: '{match_segment[:50]}...'"
+        )
+    else:
+        # If no header is found, default to the first 150 characters,
+        # as a general best practice for job description parsing.
+        match_segment = job_text[:150].strip()
+        print(
+            f"DEBUG: No header found. Using first 150 characters. Segment: '{match_segment[:50]}...'"
+        )
+
+    # 3. Process the targeted segment
+    if not match_segment:
+        return "No text available for processing."
+
+    doc = nlp(match_segment)
+
+    # 4. Extract the most prominent ORG from the segment
+    # Priority: The first proper Noun Entity or the longest ORG entity.
+
+    # List to hold potential organization names
+    org_candidates = []
+
+    for ent in doc.ents:
+        # Filter for Organization entities
+        if ent.label_ == "ORG":
+            org_candidates.append(ent.text.strip())
+
+    if org_candidates:
+        # Return the first ORG entity found, as it is usually the primary company
+        return org_candidates[0]
+
+    # Final fallback (Optional: use the PROPN rule from the previous example for robustness)
+    matcher = Matcher(nlp.vocab)
+    pattern = [
+        {"POS": "PROPN", "TEXT": {"REGEX": "^[A-Z].*"}},
+        {"LEMMA": {"IN": ["be", "help", "look", "is", "we"]}, "OP": "+"},
+    ]
+    matcher.add("EMPLOYER_NAME_RULE", [pattern])
+
+    matches = matcher(doc)
+    if matches:
+        return doc[matches[0][1]].text.strip()
+
+    return "Unknown"
 
 
-# def parse_resume_get_name_email_phone(text):
-#     doc = nlp(text[:200])
-#     data = {"name": "", "email": "", "phone_number": ""}
+def nlp_extract_name(resume_text):
+    """Extracts the name of a person from resume text using pattern matching."""
+    # Pre-process the text to remove extra whitespace and newlines
+    cleaned_text = " ".join(resume_text[:200].split())
+    doc = nlp(cleaned_text)
+    matcher = Matcher(nlp.vocab)
 
-#     # 1 get name
-#     name = extract_name(text)
-#     if name:
-#         data["name"] = name
-#         print(f"Name: {data['name']}")
-#     # 2. Extract Email using Regex (Simpler than NLP)
-#     email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
-#     email_match = re.search(email_pattern, text)
-#     if email_match:
-#         data["email"] = email_match.group(0)
-#         print(f"Email: {data['email']}")
+    # Pattern to find two consecutive proper nouns (FirstName LastName)
+    pattern = [{"POS": "PROPN"}, {"POS": "PROPN"}]
+    matcher.add("NAME", [pattern])
+    matches = matcher(doc)
 
-#     # 3. Extract Phone Number
-#     phone_pattern = r"(\d{3}[-\.\s]??\d{3}[-\.\s]??\d{4}|\(\d{3}\)\s*\d{3}[-\.\s]??\d{4}|\d{3}[-\.\s]??\d{4})"
-#     phone_match = re.search(phone_pattern, text)
-#     if phone_match:
-#         data["phone_number"] = phone_match.group(0)
-#         print(f"Phone Number: {data['phone_number']}")
+    # Return the first match found
+    if matches:
+        return doc[matches[0][1] : matches[0][2]].text.strip()
+    return None
 
-#     return data
+
+def nlp_parse_resume_get_name_email_phone(text):
+    doc = nlp(text[:200])
+    data = {"name": "", "email": "", "phone_number": ""}
+
+    # 1 get name
+    name = nlp_extract_name(text)
+    if name:
+        data["name"] = name
+        print(f"Name: {data['name']}")
+    # 2. Extract Email using Regex (Simpler than NLP)
+    email_pattern = r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}"
+    email_match = re.search(email_pattern, text)
+    if email_match:
+        data["email"] = email_match.group(0)
+        print(f"Email: {data['email']}")
+
+    # 3. Extract Phone Number
+    phone_pattern = r"(\d{3}[-\.\s]??\d{3}[-\.\s]??\d{4}|\(\d{3}\)\s*\d{3}[-\.\s]??\d{4}|\d{3}[-\.\s]??\d{4})"
+    phone_match = re.search(phone_pattern, text)
+    if phone_match:
+        data["phone_number"] = phone_match.group(0)
+        print(f"Phone Number: {data['phone_number']}")
+
+    return data
 
 
 # def parse_resume_get_skills(text, target_skills: List[str]):
@@ -376,42 +455,53 @@ def identify_job_source(url: str) -> dict:
     return job_source
 
 
+def list_genai_models(only_generate_content: bool = False):
+    load_dotenv()
+    genai_client = genai.Client()
+    genai_models = genai_client.models.list()
+    for model in genai_models:
+        # Optional: Filter by capability (e.g., models that support generating content)
+        supported_actions = model.supported_actions
+        if only_generate_content:
+            if "generateContent" not in supported_actions:
+                continue
+        print(f"\nModel Name: {model.name}")
+        try:
+            print(f"  Base Model ID: {model.base_model_id}")
+        except:
+            print("  Base Model ID: N/A")
+        try:
+            print(f"  Description: {model.description[:80]}...")
+        except:
+            print("  Description: N/A")
+
+        print(f"   Generate Content (LLM): {'generateContent' in supported_actions}")
+
+
 if __name__ == "__main__":
+    url = "https://www.linkedin.com/jobs/view/4287186320"
+    job_text = get_text_from_url(url)
+    print(job_text)
+
+    # list_genai_models(only_generate_content=True)
     url = "https://www.linkedin.com/jobs/view/4308118213/?eBP=NON_CHARGEABLE_CHANNEL&refId=G%2BFao3NOlOSc8QUHNxJkvg%3D%3D&trackingId=aHsjCzSeKWJeghtTUZFbcQ%3D%3D&trk=flagship3_search_srp_jobs&lipi=urn%3Ali%3Apage%3Ad_flagship3_search_srp_jobs%3BN3X1wCt5SMqWow9PKjAieA%3D%3D&lici=aHsjCzSeKWJeghtTUZFbcQ%3D%3D"
-    text = get_text_from_url(url)
-    # step0 = currenttimemillis()
-    # all_skills = read_skills_from_kaggle_file(False)
-    # step1 = currenttimemillis()
-    # print(f"Step 1 - fetch skills - completed in : {step1 - step0}ms")
+    # text = get_text_from_url(url)
+    resume_text = extract_text_from_file(
+        "./parsed_files/resume_NarayanNatarajan_Resume.pdfjmkpa1ma_2025-12-08_16-18-56.pdf.txt"
+    )
+    start = currenttimemillis()
+    print(nlp_parse_resume_get_name_email_phone(resume_text))
+    end = currenttimemillis()
+    print(f"Time taken: {end - start} ms")
 
-    # raw_text = extract_text_from_pdf(
-    #     Path("/mnt/g/My Drive/Personal/Resume/Srpincipal/NarayanNatarajan Resume.pdf")
-    # )
-    # step2 = currenttimemillis()
-    # print(f"Step 2 - extract text - completed in : {step2 - step1}ms")
-    # resume_skills = extract_skills_from_text_fast(raw_text, all_skills)
-    # step3 = currenttimemillis()
-    # print(f"Step 3 - extract skills - completed in : {step3 - step2}ms")
-    # print(resume_skills)
-    # step7= currenttimemillis()
-    # print(f"Step 6 - extract skills - completed in : {step7-step6}ms")
+    job_text = extract_text_from_file("./jobs/cto_cordia.txt")
+    start = currenttimemillis()
+    print(nlp_extract_organization_name(job_text))
+    end = currenttimemillis()
+    print(f"Time taken: {end - start} ms")
 
-    # sys.exit()
-
-    # # Example Usage
-    # resume_path = Path("/mnt/c/Users/venkman/Downloads/NarayanNatarajan Resume.pdf")
-    # raw_text = extract_text_from_pdf(resume_path)
-    # resume_text_path = Path(str(resume_path).replace("/", "_") + ".txt")
-    # with open(Path("resumes") / resume_text_path, "w") as f:
-    #     f.write(raw_text)
-    # # print(raw_text[:200]) # Print first 200 chars
-    # # name = extract_name(raw_text)
-    # # print(f"Name: {name}")
-    # name_email_phone_data = parse_resume_get_name_email_phone(raw_text)
-    # print(json.dumps(name_email_phone_data, indent=2))
-    # skills_data = parse_resume_get_skills(raw_text)
-    # print(json.dumps(skills_data, indent=2))
-
-    # # Example of reading job_skills.csv from the zip file
-    # # print("\nJob Skills from Kaggle file:")
-    # # print(read_skills_from_kaggle_file())
+    job_text = extract_text_from_file("./jobs/tmpxc58ghzc.txt")
+    start = currenttimemillis()
+    print(nlp_extract_organization_name(job_text))
+    end = currenttimemillis()
+    print(f"Time taken: {end - start} ms")
