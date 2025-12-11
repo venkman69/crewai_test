@@ -3,4 +3,4 @@
 
 export PYTHONPATH=$PWD/src
 
-streamlit run src/job_dash.py --server.headless true --server.port 8508
+streamlit run src/job_dash.py --server.headless true --server.port 8507
