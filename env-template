@@ -1,1 +1,5 @@
-GEMINI_API_KEY=
+GEMINI_API_KEY="<gemini api key>"
+RESUME_STORAGE_DIR="<path to resume storage directory>"
+JOB_STORAGE_DIR="<path to job storage directory>"
+CREW_OUTPUT_STORAGE_DIR="<path to crew output storage directory>"
+DEFAULT_RESUME="<path to resume pdf or text file>"
