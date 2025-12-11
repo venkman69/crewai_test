@@ -32,13 +32,24 @@ st.title("Resume Job Scorer")
 st.markdown("Upload your resume and provide a job URL to see how well you match!")
 
 
+def display_usage_metrics(usage_metrics):
+    usage_str = "AI LLM Token Usage Metrics\n"
+    for key, value in usage_metrics.items():
+        usage_str += f"{key}: {value}\n"
+    st.markdown(
+        f"<p style='font-size: 10px; white-space: pre-wrap; font-family: monospace;'>{usage_str}</p>",
+        unsafe_allow_html=True,
+    )
+
+
 # Sidebar for inputs
 with st.sidebar:
+    st.markdown("## Candidate")
     # list last 3 uploaded resumes in ./work/resumes in a dropdown  sort by date newest to oldest
     if st.button("Rescan Resume Folder"):
-        resume_files = utils.scan_resume_folder(st.session_state.resume_storage_dir)
+        resume_files = utils.get_list_of_files_desc(st.session_state.resume_storage_dir)
     else:
-        resume_files = utils.scan_resume_folder(st.session_state.resume_storage_dir)
+        resume_files = utils.get_list_of_files_desc(st.session_state.resume_storage_dir)
     resume_files = ["Upload Resume (PDF)"] + resume_files[:3]
     resume_file = st.selectbox("Resume", resume_files, index=0)
     if resume_file == "Upload Resume (PDF)":
@@ -53,6 +64,18 @@ with st.sidebar:
         "Use cached result if available", key="resume_caching", value=True
     )
 
+    st.divider()
+    st.markdown("## Job")
+    if st.button("Rescan Job Folder"):
+        previous_job_files = utils.get_list_of_files_desc(
+            st.session_state.job_storage_dir
+        )
+    else:
+        previous_job_files = utils.get_list_of_files_desc(
+            st.session_state.job_storage_dir
+        )
+
+    previous_job_file = st.selectbox("Job", previous_job_files, index=0)
     job_url = st.text_input(
         "Job URL", placeholder="https://www.linkedin.com/jobs/view/..."
     )
@@ -67,17 +90,20 @@ with st.sidebar:
     # show crew .env config items
 
 if analyze_button:
-    if resume_file is not None and (job_url or job_text):
-        if job_text:
-            # write to a temp file
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=".txt", dir="jobs"
-            ) as tmp_file:
-                tmp_file.write(job_text.encode())
-                tmp_file_path = tmp_file.name
-            job_url = tmp_file_path
+    if resume_file is not None and (job_url or job_text or previous_job_file):
         with st.spinner("Preparing files..."):
-            # Save uploaded file to a temporary location
+            if previous_job_file:
+                job_url = os.path.join(
+                    st.session_state.job_storage_dir, previous_job_file
+                )
+            elif job_text:
+                # write to a temp file
+                with tempfile.NamedTemporaryFile(
+                    delete=False, suffix=".txt", dir="jobs"
+                ) as tmp_file:
+                    tmp_file.write(job_text.encode())
+                    tmp_file_path = tmp_file.name
+                job_url = tmp_file_path
             if not previous_resume:
                 resume_file_extension = resume_file.name.split(".")[-1]
                 with tempfile.NamedTemporaryFile(
@@ -93,27 +119,41 @@ if analyze_button:
             with st.spinner("Analysing resume..."):
                 resume_parsed_filename = os.path.basename(tmp_file_path)
                 # Run the crew
-                resume_analysis, resume_analysis_path = (
+                resume_analysis, resume_analysis_path, resume_crew_usage_metrics = (
                     resume_job_scorer.resume_skill_analyser_crew(
                         tmp_file_path, resume_caching
                     )
                 )
-                st.success(
-                    f"**Resume analysis complete!**\n\n"
-                    f"Analysis saved to: `{resume_analysis_path}`\n\n"
-                    f"Resume stored as: `{st.session_state.resume_storage_dir}/{resume_parsed_filename}.txt`"
-                )
-            with st.spinner("Analyzing Job vs Resume skills and Deciding..."):
-                final_decision, final_decision_path, job_details = (
-                    resume_job_scorer.job_analysis_and_decision_crew(
-                        job_url,
-                        resume_analysis,
-                        job_caching,
+
+                col_resume_analysis1, col_resume_analysis2 = st.columns([0.8, 0.2])
+                with col_resume_analysis1:
+                    st.success(
+                        f"**Resume analysis complete!**  \n"
+                        f"Analysis saved to: `{resume_analysis_path}`  \n"
+                        f"Resume stored as: `{st.session_state.resume_storage_dir}/{resume_parsed_filename}.txt`"
                     )
+                with col_resume_analysis2:
+                    display_usage_metrics(resume_crew_usage_metrics)
+            with st.spinner("Analyzing Job vs Resume skills and Deciding..."):
+                (
+                    final_decision,
+                    final_decision_path,
+                    job_details,
+                    job_crew_usage_metrics,
+                ) = resume_job_scorer.job_analysis_and_decision_crew(
+                    job_url,
+                    resume_analysis,
+                    job_caching,
                 )
-                st.success(
-                    f"**Final decision complete!**\n\nDecision analysis saved to: `{final_decision_path}`"
-                )
+
+                col_final_decision1, col_final_decision2 = st.columns([0.8, 0.2])
+                with col_final_decision1:
+                    st.success(
+                        f"**Final decision complete!**  \n"
+                        f"Decision analysis saved to: `{final_decision_path}`"
+                    )
+                with col_final_decision2:
+                    display_usage_metrics(job_crew_usage_metrics)
 
             # Parse the output
             try:
@@ -269,4 +309,4 @@ if analyze_button:
             st.error(f"An error occurred during analysis: {e}")
 
     else:
-        st.warning("Please upload a resume and provide a job URL.")
+        st.warning("Please upload or select a resume and provide a job URL.")
