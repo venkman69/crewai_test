@@ -1,13 +1,8 @@
 import json
-from typing import List
-import zipfile
-from pdfminer.high_level import extract_text
 import os
 from dotenv import load_dotenv
 from pathlib import Path
-import io
 import re
-import csv
 import sys
 from diskcache import Cache
 import time
@@ -16,12 +11,12 @@ from bs4 import BeautifulSoup
 import random
 import string
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
 from google import genai
 import spacy
 from spacy.matcher import Matcher
 from spacy.cli import download
 from markdownify import markdownify as md
+import pymupdf4llm
 
 # TODO: Implement playwright in downloading from URL
 
@@ -36,6 +31,40 @@ except Exception as e:
     except Exception as e:
         raise e
 currenttimemillis = lambda: int(round(time.time() * 1000))
+
+
+def make_work_dirs():
+    resume_storage_dir = os.getenv("RESUME_STORAGE_DIR")
+    if not os.path.exists(resume_storage_dir):
+        os.makedirs(resume_storage_dir)
+
+    job_storage_dir = os.getenv("JOB_STORAGE_DIR")
+    if not os.path.exists(job_storage_dir):
+        os.makedirs(job_storage_dir)
+
+    crew_output_storage_dir = os.getenv("CREW_OUTPUT_STORAGE_DIR")
+    if not os.path.exists(crew_output_storage_dir):
+        os.makedirs(crew_output_storage_dir)
+
+
+def extract_text_from_various_sources(text_source: str) -> str:
+    try:
+        if Path(text_source).exists():
+            if text_source.endswith(".pdf"):
+                print(f"Extracting text from PDF: {text_source}")
+                return extract_text_from_pdf(text_source)
+            elif text_source.endswith(".txt"):
+                print(f"Extracting text from TXT: {text_source}")
+                return extract_text_from_file(text_source)
+        elif text_source.startswith("http"):
+            print(f"Extracting text from URL: {text_source}")
+            return get_text_from_url(text_source)
+        else:
+            return text_source
+    except Exception:
+        # exception is thrown if it is already text and Path will throw an exception
+        print("Assuming the text source is already raw text")
+        return text_source
 
 
 def extract_json_from_crew_output(crew_output: str) -> dict:
@@ -90,24 +119,20 @@ def extract_text_from_file(file_path: str) -> str:
         raise e
 
 
-def extract_clean_text_from_file(file_path):
-    try:
-        print(f"Extracting text from {file_path}")
-        # Extracts all text from the file
-        with open(file_path, "r") as f:
-            text = f.read()
-        clean_text = " ".join(text.split())
-        return clean_text
-    except Exception as e:
-        return str(e)
-
-
 def extract_text_from_pdf(pdf_path):
+    """
+    Extracts text from a PDF file and returns it as a markdown string.
+    also writes the markdown to a file in the resume storage directory
+    """
     try:
-        text_file_path = Path("parsed_files") / f"{Path(pdf_path).name}.txt"
+        text_file_path = os.path.join(
+            os.getenv("RESUME_STORAGE_DIR"), f"{Path(pdf_path).name}.md"
+        )
         print(f"Extracting text from {pdf_path}")
         # Extracts all text from the PDF file
-        text = extract_text(pdf_path)
+        text = pymupdf4llm.to_markdown(pdf_path)
+        # somehow text includes zero-width space chars "<200b>", remove these
+        text = text.replace("\u200b", "").replace("<200b>", "")
         # there appear to be lots of tabs and junk in the pdf extraction
         # this somewhat cleans that up
         clean_text = " ".join(text.split())
@@ -199,7 +224,7 @@ def nlp_extract_organization_name(job_text: str) -> list[str]:
     return "Unknown"
 
 
-def nlp_extract_name(resume_text):
+def nlp_extract_candidate_name(resume_text):
     """Extracts the name of a person from resume text using pattern matching."""
     # Pre-process the text to remove extra whitespace and newlines
     cleaned_text = " ".join(resume_text[:200].split())
@@ -222,7 +247,7 @@ def nlp_parse_resume_get_name_email_phone(text):
     data = {"name": "", "email": "", "phone_number": ""}
 
     # 1 get name
-    name = nlp_extract_name(text)
+    name = nlp_extract_candidate_name(text)
     if name:
         data["name"] = name
         print(f"Name: {data['name']}")
@@ -241,181 +266,6 @@ def nlp_parse_resume_get_name_email_phone(text):
         print(f"Phone Number: {data['phone_number']}")
 
     return data
-
-
-# def parse_resume_get_skills(text, target_skills: List[str]):
-#     doc = nlp(text)
-#     data = {
-#         "skills": [],
-#     }
-
-#     # 3. Extract Skills (Keyword Matching)
-#     # In a real app, load this list from a database or use a Skill Ontology
-#     # target_skills = ["Python", "SQL", "Machine Learning", "Communication", "Java", "React"]
-
-#     # Normalize text to lowercase for matching
-#     text_lower = text.lower()
-#     for skill in target_skills:
-#         if skill.lower() in text_lower:
-#             data["skills"].append(skill)
-
-#     return data
-
-
-# A small "Blocklist" to ignore generic corporate words that are nouns but not skills
-# You can expand this list over time
-# GENERIC_STOP_WORDS = {
-#     "experience",
-#     "candidate",
-#     "ability",
-#     "knowledge",
-#     "years",
-#     "work",
-#     "team",
-#     "role",
-#     "requirements",
-#     "responsibilities",
-#     "degree",
-#     "skills",
-#     "environment",
-#     "projects",
-#     "company",
-#     "opportunity",
-# }
-
-
-# def read_skills_from_kaggle_file(cache: bool = True) -> set:
-#     """
-#     Reads 'job_skills.csv' from 'archive.zip' and returns its content.
-#     """
-#     zip_file_path = "archive.zip"
-#     csv_file_name = "job_skills.csv"
-#     dc_key = f"{zip_file_path}:{csv_file_name}"
-#     if cache:
-#         all_skills = dc.get(dc_key, None)
-#         if all_skills is not None:
-#             print(f"Using cached skills for {dc_key}")
-#             return set(all_skills)
-#     all_skills = set()
-
-#     try:
-#         with zipfile.ZipFile(zip_file_path, "r") as zf:
-#             with zf.open(csv_file_name, "r") as csv_file:
-#                 # Wrap the binary file in a TextIOWrapper to decode line-by-line, improving memory efficiency.
-#                 text_stream = io.TextIOWrapper(csv_file, encoding="utf-8")
-#                 csv_reader = csv.reader(text_stream)
-#                 next(csv_reader)  # Skip header row
-
-#                 for row in csv_reader:
-#                     if len(row) > 1:
-#                         # Use update() for in-place modification, which is more performant than union().
-#                         skills_to_add = (skill.strip() for skill in row[1].split(","))
-#                         all_skills.update(skills_to_add)
-
-#         with open("work/skills.txt", "w") as f:
-#             f.write("\n".join(all_skills))
-#             print("Wrote skills to work/skills.txt")
-#     except Exception as e:
-#         dc.set(dc_key, list(all_skills))
-#         return all_skills
-
-
-# def extract_skills_from_text(text: str, skill_set: set = None) -> set:
-#     """
-#     Efficiently extracts skills from text using regex matching.
-
-#     Args:
-#         text: The text to extract skills from (resume or job description)
-#         skill_set: Set of skills to search for. If None, loads from Kaggle file.
-
-#     Returns:
-#         Set of matched skills (normalized to lowercase)
-
-#     Performance optimizations:
-#     - Uses regex with word boundaries for accurate matching
-#     - Case-insensitive matching via lowercase normalization
-#     - Avoids creating large spaCy pipelines
-#     - Uses set operations for fast lookups
-#     """
-#     if skill_set is None:
-#         skill_set = read_skills_from_kaggle_file()
-
-#     # Normalize text to lowercase for case-insensitive matching
-#     text_lower = text.lower()
-
-#     # Extract matched skills
-#     matched_skills = set()
-
-#     # Create a mapping of lowercase skills to original case for better matching
-#     # This allows us to match case-insensitively but return consistent results
-#     skill_map = {skill.lower(): skill for skill in skill_set}
-
-#     # Sort skills by length (longest first) to match multi-word skills before single words
-#     # This prevents "Machine Learning" from being split into "Machine" and "Learning"
-#     sorted_skills = sorted(skill_map.keys(), key=len, reverse=True)
-
-#     # Use regex with word boundaries for accurate matching
-#     # This prevents partial word matches (e.g., "C" matching "CSS")
-#     processed_skills = 0
-#     total_skills = len(sorted_skills)
-#     for skill_lower in sorted_skills:
-#         processed_skills += 1
-#         if processed_skills % 1000 == 0:
-#             print(
-#                 f"Processed {processed_skills}/{total_skills} {processed_skills / total_skills * 100:.2f}% skills"
-#             )
-#         # Escape special regex characters in the skill name
-#         escaped_skill = re.escape(skill_lower)
-#         # Use word boundaries (\b) to match whole words/phrases only
-#         pattern = r"\b" + escaped_skill + r"\b"
-
-#         if re.search(pattern, text_lower):
-#             matched_skills.add(skill_lower)
-
-#     return matched_skills
-
-
-# def extract_skills_from_text_fast(text: str, skill_set: set = None) -> set:
-#     """
-#     Fast skill extraction using pre-compiled regex patterns with word boundaries.
-
-#     This version uses compiled regex patterns for better performance while
-#     maintaining accuracy with word boundary matching.
-
-#     Args:
-#         text: The text to extract skills from
-#         skill_set: Set of skills to search for. If None, loads from Kaggle file.
-
-#     Returns:
-#         Set of matched skills (normalized to lowercase)
-#     """
-#     if skill_set is None:
-#         raise ValueError("skill_set must be provided")
-
-#     # Normalize text to lowercase
-#     text_lower = text.lower()
-
-#     # Pre-compile regex patterns for all skills (with caching for repeated calls)
-#     # This is faster than compiling on each search
-#     matched_skills = set()
-#     total_skills = len(skill_set)
-#     processed_skills = 0
-#     for skill in skill_set:
-#         processed_skills += 1
-#         skill_lower = skill.lower()
-#         # Escape special regex characters and add word boundaries
-#         escaped_skill = re.escape(skill_lower)
-#         pattern = r"\b" + escaped_skill + r"\b"
-
-#         # Use re.search which is faster than re.findall when we just need to know if it exists
-#         if re.search(pattern, text_lower):
-#             matched_skills.add(skill_lower)
-#         if processed_skills % 1000 == 0:
-#             print(
-#                 f"Processed {processed_skills}/{total_skills} {processed_skills / total_skills * 100:.2f}% skills"
-#             )
-
-#     return matched_skills
 
 
 def identify_job_source(url: str) -> dict:
@@ -478,7 +328,22 @@ def list_genai_models(only_generate_content: bool = False):
         print(f"   Generate Content (LLM): {'generateContent' in supported_actions}")
 
 
+def scan_resume_folder(resume_storage_dir):
+    resume_files = os.listdir(resume_storage_dir)
+    resume_files.sort(
+        key=lambda x: os.path.getmtime(os.path.join(resume_storage_dir, x)),
+        reverse=True,
+    )
+    return resume_files
+
+
 if __name__ == "__main__":
+    load_dotenv()
+    default_resume = os.getenv("DEFAULT_RESUME")
+    resume_text = extract_text_from_pdf(default_resume)
+    candidate_name = nlp_extract_candidate_name(resume_text)
+    print(candidate_name)
+    sys.exit()
     url = "https://www.linkedin.com/jobs/view/4287186320"
     job_text = get_text_from_url(url)
     print(job_text)
