@@ -224,7 +224,11 @@ def job_analysis_and_decision_crew(
     print(f"Job vs Resume skill matching took {end - start} ms")
     print("Caching result for job")
     save_path = save_job_skill_analysis(job_crew, result, job_details, "job_vs_resume")
-    utils.dc[(resume_analysis, job_text, job_details)] = (result, save_path)
+    utils.dc[(resume_analysis, job_text, job_details)] = (
+        result,
+        save_path,
+        job_details,
+    )
     return result, save_path, job_details
 
 
