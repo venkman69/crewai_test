@@ -52,8 +52,11 @@ resume_skill_analyzer_agent = Agent(
     allow_delegation=False,
 )
 resume_skill_analyzer_task = Task(
-    description="""Extract the skills and years of work experience from the resume raw string data within resume text.
-    work experience is overall number of years from the start date of the first job to the end date of the last job and round up.
+    description="""Extract the skills and years of work experience from the resume raw string data 
+    within resume text.
+    work experience is overall number of years from the start date of the first job
+     to the end date of the last job and round up.
+    Identify certifications and security clearances.
     Resume Text is provided as below: {resume_text}""",
     agent=resume_skill_analyzer_agent,
     expected_output="""Output MUST be just the JSON object, 
@@ -61,19 +64,11 @@ resume_skill_analyzer_task = Task(
         {
             "resume_skills":["Python","WAF","Jira"], 
             "years_of_experience":5,
+            "certifications":["CISSP", "AWS Certified Solutions Architect-Associate","AWS Certified Developer-Associate"],
+            "security_clearances":["TS/SCI"],
         }""",
 )
 
-# job_vs_resume_skill_matching_agent = Agent(
-#     role="HR Expert who can review the job skills and candidate skills and assign a score",
-#     goal="""Review the job skills and candidate skills and assign a score.""",
-#     backstory="""You are an expert HR professional who can determine how a candidate skills match the required and preferred skills in a job description
-#     """,
-#     llm=llm_choice,
-#     verbose=True,
-#     allow_delegation=False,
-#     memory=True,
-# )
 job_vs_resume_skill_matching_agent = Agent(
     role="HR Expert who can review the job description, then extract required and preferred skills and compare with candidate skills and assign a score",
     goal="""Review the job skills and candidate skills and assign a score.""",
@@ -93,11 +88,18 @@ job_vs_resume_skill_matching_task = Task(
     * summary of the role,
     * years of industry experience,
     * and skills categorized into required and preferred.
+    * Required certifications
+    * Required security clearances.
 
     ## Use this criteria to calculate the score:
-    1. Calculate 'required_skill_match_score': Count the number of required skills in the job that are present in the candidate and divide by the total number of required skills in the job to get the required skill match score.
-    2. Calculate 'preferred_skill_match_score': Count the number of preferred skills in the job that are present in the candidate and divide by the total number of preferred skills in the job to get the preferred skill match score.
-    3. Calculate 'final_score': Final score = required_skill_match_score * 0.7 + preferred_skill_match_score * 0.3  
+    1. Calculate 'required_skill_match_score': Count the number of required skills in the job 
+       that are present in the candidate and divide by the total number of required skills in 
+       the job to get the required skill match score.
+    2. Calculate 'preferred_skill_match_score': Count the number of preferred skills in the job
+       that are present in the candidate and divide by the total number of preferred skills in 
+       the job to get the preferred skill match score.
+    3. Calculate 'final_score': 
+       Final score = required_skill_match_score * 0.7 + preferred_skill_match_score * 0.3  
     for example if job has 10 required skills and 5 preferred skills and 
        candidate has 8 required skills and 3 preferred skills then final score = 8/10 * 0.7 + 3/5 * 0.3 = 0.74
     4. Score data should be presented as keys in JSON output as below:
@@ -133,6 +135,10 @@ job_vs_resume_skill_matching_task = Task(
             "missing_required_skills":["Ruby", "TOGAF"], 
             "matching_preferred_skills":["CISSP","WAF"],
             "missing_preferred_skills":["Jira","management"],
+            "matching_certifications":["CISSP"],
+            "missing_certifications":["AWS Certified Solutions Architect-Associate"],
+            "matching_security_clearances":["TS/SCI"],
+            "missing_security_clearances":["TS/SCI"],
             "score": {
                 "final_score": 0.7633,
                 "required_skill_match_score": 0.8333,
@@ -142,13 +148,18 @@ job_vs_resume_skill_matching_task = Task(
                 "matching_preferred_skills_count": 6,
                 "missing_preferred_skills_count": 4,
                 "total_required_skills_count": 24,
-                "total_preferred_skills_count": 10
+                "total_preferred_skills_count": 10,
+                "matching_certifications_count": 1,
+                "missing_certifications_count": 1,
+                "matching_security_clearances_count": 1,
+                "missing_security_clearances_count": 1
             }
             "organization":"Google",
             "years_of_experience":5,
             "job_summary":"Role summary text",
-            "decision":"Pass",
+            "decision":"Pass" or "Fail",
             "reason":"Score is above 70% and candidate has sufficient skills and years of experience",
+            
         }""",
 )
 
@@ -158,15 +169,22 @@ def resume_skill_analyser_crew(
 ) -> tuple[CrewOutput, str]:
     # get the resume text
     resume_text = utils.extract_text_from_various_sources(resume_url_or_text)
-    # append that I am a citizen of the United States
-    resume_text += "\nI am a citizen of the United States"
     # extract name, email, phone number from resume text
     candidate_info = utils.nlp_parse_resume_get_name_email_phone(resume_text)
     print(candidate_info)
 
     if get_from_cache and resume_text in utils.dc:
         print(f"Returning cached result for resume {resume_url_or_text[:100]}...")
-        return utils.dc[resume_text]
+        cached_result = list(utils.dc[resume_text])
+        crew_usage_metrics = {
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "completion_tokens": 0,
+            "successful_requests": 0,
+        }
+        cached_result.append(crew_usage_metrics)
+        return cached_result
     resume_crew = Crew(
         agents=[
             resume_skill_analyzer_agent,
@@ -183,8 +201,10 @@ def resume_skill_analyser_crew(
     print(f"Resume skill analysis took {end - start} ms")
     print("Caching result for resume")
     save_path = save_resume_skill_analysis(resume_crew, result, candidate_info)
+    crew_usage_metrics = resume_crew.usage_metrics.__dict__
+
     utils.dc[resume_text] = result, save_path
-    return result, save_path
+    return result, save_path, crew_usage_metrics
 
 
 def job_analysis_and_decision_crew(
@@ -203,9 +223,19 @@ def job_analysis_and_decision_crew(
     job_text = utils.extract_text_from_various_sources(job_url)
     job_details = utils.identify_job_source(job_url)
     resume_analysis = resume_output.raw
-    if get_from_cache and (resume_analysis, job_text, job_details) in utils.dc:
+    if get_from_cache and (resume_analysis, job_text) in utils.dc:
         print("Returning cached result for compare and decide")
-        return utils.dc[(resume_analysis, job_text, job_details)]
+        cached_result = list(utils.dc[(resume_analysis, job_text)])
+        # set usage to zero for cached result
+        crew_usage_metrics = {
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "cached_prompt_tokens": 0,
+            "completion_tokens": 0,
+            "successful_requests": 0,
+        }
+        cached_result.append(crew_usage_metrics)
+        return cached_result
     job_crew = Crew(
         agents=[
             job_vs_resume_skill_matching_agent,
@@ -223,31 +253,49 @@ def job_analysis_and_decision_crew(
     end = utils.currenttimemillis()
     print(f"Job vs Resume skill matching took {end - start} ms")
     print("Caching result for job")
-    save_path = save_job_skill_analysis(job_crew, result, job_details, "job_vs_resume")
-    utils.dc[(resume_analysis, job_text, job_details)] = (
+    result_save_path = save_job_skill_analysis(
+        job_crew, result, job_details, "job_vs_resume"
+    )
+    if Path(job_url).parent != Path(os.getenv("JOB_STORAGE_DIR")):
+        # if job is in tmp folder etc from an upload, save it to the job storage dir
+        job_save_path = save_job_description(job_text, job_details, result)
+        print(f"Job saved to {job_save_path}")
+    utils.dc[(resume_analysis, job_text)] = (
         result,
-        save_path,
+        result_save_path,
         job_details,
     )
-    return result, save_path, job_details
+    crew_usage_metrics = job_crew.usage_metrics.__dict__
+    return (result, result_save_path, job_details, crew_usage_metrics)
 
 
-def save_job_skill_analysis(
-    crew_object: Crew, crew_result: CrewOutput, job_details: dict, prefix: str
-):
-    print(f"Writing {prefix} task output")
-    os.makedirs("logs", exist_ok=True)
+def get_job_file_name(crew_result: CrewOutput, job_details: dict):
     job_skill_analysis_result_json = utils.extract_json_from_crew_output(
         crew_result.raw
     )
     job_org = job_skill_analysis_result_json.get("organization", "Unknown")
-    # job_source = {"job_source": "", "job_id": random_id, "job_url": ""}
     job_id = job_details.get("job_id", "Unknown")
     job_source = job_details.get("job_source", "Unknown")
     job_org = job_org.replace(" ", "_")
     job_id = job_id.replace(" ", "_")
     job_source = job_source.replace(" ", "_")
-    job_filename = f"{prefix}_{job_source}_{job_org}_{job_id}.txt"
+    job_filename = f"{job_source}_{job_org}_{job_id}.txt"
+    return job_filename
+
+
+def save_job_description(job_text: str, job_details: dict, crew_result: CrewOutput):
+    job_filename = get_job_file_name(crew_result, job_details)
+    job_storage_dir = os.getenv("JOB_STORAGE_DIR")
+    with open(f"{job_storage_dir}/{job_filename}", "w") as f:
+        f.write(job_text)
+    return job_filename
+
+
+def save_job_skill_analysis(
+    crew_object: Crew, crew_result: CrewOutput, job_details: dict, prefix: str
+):
+    job_filename = prefix + "_" + get_job_file_name(crew_result, job_details)
+    print(f"Writing {prefix} task output")
     save_result(crew_object, crew_result, job_filename, job_details)
     return job_filename
 
@@ -256,7 +304,6 @@ def save_resume_skill_analysis(
     crew_object: Crew, crew_result: CrewOutput, candidate_info: dict
 ):
     print("Writing Resume task outputs to files")
-    os.makedirs("logs", exist_ok=True)
     candidate_name = candidate_info.get("name", "Unknown").replace(" ", "_")
     datestr = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     resume_analysis_filename = f"resume_skills_analysis_{candidate_name}_{datestr}.txt"
@@ -302,7 +349,7 @@ if __name__ == "__main__":
         print(
             "** Cannot access default resume file **, checking the resume storage directory instead"
         )
-        resumes = utils.scan_resume_folder(resume_storage_dir)
+        resumes = utils.get_list_of_files_desc(resume_storage_dir)
         if len(resumes) == 0:
             print("No resumes found in resume storage directory")
             exit(1)

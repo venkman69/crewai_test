@@ -328,13 +328,13 @@ def list_genai_models(only_generate_content: bool = False):
         print(f"   Generate Content (LLM): {'generateContent' in supported_actions}")
 
 
-def scan_resume_folder(resume_storage_dir):
-    resume_files = os.listdir(resume_storage_dir)
-    resume_files.sort(
-        key=lambda x: os.path.getmtime(os.path.join(resume_storage_dir, x)),
+def get_list_of_files_desc(folder):
+    files = os.listdir(folder)
+    files.sort(
+        key=lambda x: os.path.getmtime(os.path.join(folder, x)),
         reverse=True,
     )
-    return resume_files
+    return files
 
 
 if __name__ == "__main__":
