@@ -200,7 +200,7 @@ def job_analysis_and_decision_crew(
         tuple[CrewOutput, str, dict]: (job_analysis, job_analysis_path, job_details)
     """
     # get the job text
-    job_text = utils.extract_text_from_various_sources.run(job_url)
+    job_text = utils.extract_text_from_various_sources(job_url)
     job_details = utils.identify_job_source(job_url)
     resume_analysis = resume_output.raw
     if get_from_cache and (resume_analysis, job_text, job_details) in utils.dc:

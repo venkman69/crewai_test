@@ -53,7 +53,7 @@ def extract_text_from_various_sources(text_source: str) -> str:
             if text_source.endswith(".pdf"):
                 print(f"Extracting text from PDF: {text_source}")
                 return extract_text_from_pdf(text_source)
-            elif text_source.endswith(".txt"):
+            elif text_source.endswith(".txt") or text_source.endswith(".md"):
                 print(f"Extracting text from TXT: {text_source}")
                 return extract_text_from_file(text_source)
         elif text_source.startswith("http"):
