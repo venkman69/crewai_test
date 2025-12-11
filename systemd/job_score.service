@@ -1,0 +1,17 @@
+[Unit]
+Description=Job Score Service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=exec
+# Replace /path/to/your/backup_script.sh with the actual path to your script
+ExecStart=%h/git/crewai_test/bin/rundash start
+
+
+# # Optional: Set a user to run the script as (e.g., a non-root user for security)
+#User=venkman
+#Group=venkman
+#
+[Install]
+WantedBy=default.target

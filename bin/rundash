@@ -1,0 +1,37 @@
+#!/bin/bash
+SCRIPTDIR=$(readlink -f $(dirname $0))
+PROJDIR=$(dirname $SCRIPTDIR)
+SCRIPTNAME=$(basename $0)
+PORT=8507
+BASE="jobscore"
+cd $PROJDIR
+mkdir logs 2>/dev/null
+mkdir work 2>/dev/null
+pidfile="./work/.$SCRIPTNAME.pid"
+. $SCRIPTDIR/run_functions
+
+if [ -f .env ]; then
+# load environment variables from .env file if it exists
+    . ./.env
+fi
+if [ ! -f .python-version ]; then
+    echo "Error: .python-version file is missing. uv will fail."
+    exit 1
+else
+    echo "Python version .python_version is set to $(cat .python-version)"
+fi
+install_python
+makevenv
+
+function start_this {
+    ./venv/bin/streamlit run src/job_dash.py --server.address="0.0.0.0" --server.port=$PORT --server.headless true --server.enableCORS=false --server.baseUrlPath=/$BASE 
+}
+
+
+if [ $# -eq 0 ];then
+
+    echo "$SCRIPTNAME [start|stop|status|makevenv|rebuild]"
+    exit 1
+fi
+
+eval $1 
