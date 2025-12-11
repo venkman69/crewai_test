@@ -9,7 +9,6 @@ dependencies = [
     "crewai[google-genai,tools]",
     "openai>=2.8.1",
     "diskcache>=5.3.1",
-    "pdfminer.six>=20221105",
     "streamlit>=1.52.0",
     "litellm>=1.80.8",
     "spacy>=3.8.11",
