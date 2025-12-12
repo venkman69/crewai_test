@@ -1,5 +1,6 @@
 import streamlit as st
 import os
+import traceback
 import tempfile
 import json
 import resume_job_scorer
@@ -44,7 +45,7 @@ def display_usage_metrics(usage_metrics):
 
 # Sidebar for inputs
 with st.sidebar:
-    st.markdown("## Candidate")
+    st.markdown("### Candidate")
     # list last 3 uploaded resumes in ./work/resumes in a dropdown  sort by date newest to oldest
     if st.button("Rescan Resume Folder"):
         resume_files = utils.get_list_of_files_desc(st.session_state.resume_storage_dir)
@@ -64,14 +65,13 @@ with st.sidebar:
         "Use cached result if available", key="resume_caching", value=True
     )
 
-    st.divider()
-    st.markdown("## Job")
+    st.markdown("### Job")
     if st.button("Rescan Job Folder"):
-        previous_job_files = utils.get_list_of_files_desc(
+        previous_job_files = ["Upload Job file"] + utils.get_list_of_files_desc(
             st.session_state.job_storage_dir
         )
     else:
-        previous_job_files = utils.get_list_of_files_desc(
+        previous_job_files = ["Upload Job file"] + utils.get_list_of_files_desc(
             st.session_state.job_storage_dir
         )
 
@@ -92,7 +92,7 @@ with st.sidebar:
 if analyze_button:
     if resume_file is not None and (job_url or job_text or previous_job_file):
         with st.spinner("Preparing files..."):
-            if previous_job_file:
+            if previous_job_file != "Upload Job file":
                 job_url = os.path.join(
                     st.session_state.job_storage_dir, previous_job_file
                 )
@@ -307,6 +307,7 @@ if analyze_button:
 
         except Exception as e:
             st.error(f"An error occurred during analysis: {e}")
+            st.code(traceback.format_exc())
 
     else:
         st.warning("Please upload or select a resume and provide a job URL.")
