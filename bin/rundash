@@ -24,7 +24,7 @@ install_python
 makevenv
 
 function start_this {
-    ./venv/bin/streamlit run src/job_dash.py --server.address="0.0.0.0" --server.port=$PORT --server.headless true --server.enableCORS=false --server.baseUrlPath=/$BASE 
+    ./.venv/bin/streamlit run src/job_dash.py --server.address="0.0.0.0" --server.port=$PORT --server.headless true --server.enableCORS=false --server.baseUrlPath=/$BASE 
 }
 
 

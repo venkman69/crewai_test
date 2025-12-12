@@ -57,27 +57,24 @@ status() {
 }
 install_python() {
     install_uv
-    uv python find "${PYTHON_VERSION}" >/dev/null
-    if [ $? -ne 0 ]
-    then
-        >&2 echo "Installing Python $PYTHON_VERSION"
-        uv python install $PYTHON_VERSION
-    else
-        >&2 echo "Python $PYTHON_VERSION is already installed"
+    if [ ! -f .python-version ]; then
+        >&2 echo "Aborting - file not found: .python-version"
+        exit 1
     fi
+    >&2 echo "Installing Python $(cat .python-version)"
+    uv python install
 }
 makevenv() {
-    if [ ! -d venv ]
+    if [ ! -d .venv ]
     then
         install_uv
         >&2 echo "Creating virtual environment"
-        uv venv venv --python $PYTHON_VERSION
+        uv venv --seed
     fi
-    . ./venv/bin/activate
+    . ./.venv/bin/activate
     >&2 echo "Installing dependencies"
     if [ -f pyproject.toml ]; then
         >&2 echo "Running uv sync on pyproject.toml"
-        export UV_PROJECT_ENVIRONMENT=venv
         uv sync
     else
         uv pip install setuptools
