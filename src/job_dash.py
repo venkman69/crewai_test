@@ -67,13 +67,13 @@ with st.sidebar:
 
     st.markdown("### Job")
     if st.button("Rescan Job Folder"):
-        previous_job_files = ["Upload Job file"] + utils.get_list_of_files_desc(
-            st.session_state.job_storage_dir
-        )
+        previous_job_files = [
+            "Previous Job Submissions"
+        ] + utils.get_list_of_files_desc(st.session_state.job_storage_dir)
     else:
-        previous_job_files = ["Upload Job file"] + utils.get_list_of_files_desc(
-            st.session_state.job_storage_dir
-        )
+        previous_job_files = [
+            "Previous Job Submissions"
+        ] + utils.get_list_of_files_desc(st.session_state.job_storage_dir)
 
     previous_job_file = st.selectbox("Job", previous_job_files, index=0)
     job_url = st.text_input(
@@ -90,9 +90,13 @@ with st.sidebar:
     # show crew .env config items
 
 if analyze_button:
-    if resume_file is not None and (job_url or job_text or previous_job_file):
+    if resume_file is not None and (
+        job_url != ""
+        or job_text != ""
+        or previous_job_file != "Previous Job Submissions"
+    ):
         with st.spinner("Preparing files..."):
-            if previous_job_file != "Upload Job file":
+            if previous_job_file != "Previous Job Submissions":
                 job_url = os.path.join(
                     st.session_state.job_storage_dir, previous_job_file
                 )
