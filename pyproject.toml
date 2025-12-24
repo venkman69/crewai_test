@@ -13,6 +13,7 @@ dependencies = [
     "litellm>=1.80.8",
     "spacy>=3.8.11",
     "markdownify>=1.2.2",
-    "pymupdf4llm>=0.2.7",
+
     "vulture>=2.14",
+    "markitdown>=0.1.4",
 ]
