@@ -1,0 +1,19 @@
+
+resume_skill_analysis:
+  description: >
+    Extract the skills and years of work experience from the resume raw string data 
+    within resume text.
+    work experience is overall number of years from the start date of the first job
+    to the end date of the last job and round up.
+    Identify certifications and security clearances.
+    Resume Text is provided as below: {resume_text}
+  expected_output: >
+    Output MUST be just the JSON object, 
+    for example : 
+        {
+            "resume_skills":["Python","WAF","Jira"], 
+            "years_of_experience":5,
+            "certifications":["CISSP", "AWS Certified Solutions Architect-Associate","AWS Certified Developer-Associate"],
+            "security_clearances":["TS/SCI"],
+        }
+  agent: resume_agent

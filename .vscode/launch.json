@@ -33,6 +33,26 @@
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             }
+        },
+        {
+            "name": "Job Score Streamlit app",
+            "type": "python",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "module": "streamlit",
+            "args": [
+                "run",
+                "src/job_score/job_dash.py",
+                "--server.headless",
+                "true",
+                "--server.port",
+                "8501",
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
         }
     ]
 }

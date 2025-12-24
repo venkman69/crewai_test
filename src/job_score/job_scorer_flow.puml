@@ -1,0 +1,58 @@
+@startuml
+skinparam componentStyle uml2
+skinparam databaseStyle uml2
+
+title Job Scoring System Data Flow
+
+actor "User" as USER
+
+box "Main Script (main.py)" #LightBlue
+    participant "Main Controller" as MAIN
+end box
+
+box "Crew Analyzer (crew_analyzer.py)" #LightYellow
+    participant "Resume Skill Analyzer" as RESUME_ANALYZER
+    participant "Job Requirements Analyzer" as JOB_ANALYZER
+    participant "Job vs Resume Analyzer" as MATCH_ANALYZER
+end box
+
+box "File System" #LightGray
+    database "Resume File" as RESUME_FILE
+    database "Job File" as JOB_FILE
+    database "Crew Outputs" as OUTPUTS
+end box
+
+participant "Utility Functions" as UTILS
+
+USER -> MAIN : Start script (new_main)
+
+group Resume Analysis Phase
+    MAIN -> RESUME_FILE : Read path
+    MAIN -> RESUME_ANALYZER : resume_skill_analyzer_crew(resume_path)
+    RESUME_ANALYZER -> UTILS : extract_text(resume_path)
+    UTILS -> RESUME_FILE : Read content
+    RESUME_ANALYZER -> RESUME_ANALYZER : Run ResumeCrew (LLM)
+    RESUME_ANALYZER -> OUTPUTS : Save ResumeSkills Analysis
+    RESUME_ANALYZER --> MAIN : Return (ResumeSkills, save_path)
+end
+
+group Job Analysis Phase
+    MAIN -> JOB_FILE : Read path
+    MAIN -> JOB_ANALYZER : job_requirements_analyzer_crew(job_path)
+    JOB_ANALYZER -> UTILS : extract_text(job_path), identify_job_source(job_source)
+    UTILS -> JOB_FILE : Read content
+    JOB_ANALYZER -> JOB_ANALYZER : Run JobCrew (LLM)
+    JOB_ANALYZER -> OUTPUTS : Save JobRequirements Analysis
+    JOB_ANALYZER --> MAIN : Return (JobRequirements, save_path, job_details)
+end
+
+group Matching Phase
+    MAIN -> MATCH_ANALYZER : job_vs_resume_analyzer_crew(resume_result, job_result, job_details)
+    MATCH_ANALYZER -> MATCH_ANALYZER : Run HRCrew (LLM)\nInput: ResumeSkills + JobRequirements
+    MATCH_ANALYZER -> OUTPUTS : Save JobVsResume Match
+    MATCH_ANALYZER --> MAIN : Return (JobVsResume, save_path, job_details)
+end
+
+MAIN -> USER : Print Results
+
+@enduml

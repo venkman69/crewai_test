@@ -16,7 +16,7 @@ import spacy
 from spacy.matcher import Matcher
 from spacy.cli import download
 from markdownify import markdownify as md
-import pymupdf4llm
+from markitdown import MarkItDown
 
 # TODO: Implement playwright in downloading from URL
 
@@ -93,11 +93,23 @@ def download_file(url):
 
 
 def get_text_from_url(url):
-    linkedin_job_description_class = "show-more-less-html__markup"
+    linkedin_selector = (
+        "div.show-more-less-html__markup, div[data-testid='job-description']"
+    )
+    peraton_selector = (
+        "body > div.section-2.white > div > div > div > div.job-desc-content"
+    )
+    workday_selector = (
+        "#mainContent > div > div.css-gk87zv > div.css-e23il0 > div.css-11p01j8"
+    )
+    jd_selector_list = [linkedin_selector, peraton_selector, workday_selector]
     bs_obj = BeautifulSoup(download_file(url), "html.parser")
     try:
-        job_description = md(str(bs_obj.find(class_=linkedin_job_description_class)))
-        if job_description is None or job_description == "":
+        for jd_selector in jd_selector_list:
+            if bs_obj.select_one(jd_selector):
+                job_description = md(str(bs_obj.select_one(jd_selector)))
+                break
+        else:
             job_description = md(str(bs_obj))
     except Exception as e:
         try:
@@ -130,16 +142,15 @@ def extract_text_from_pdf(pdf_path):
         )
         print(f"Extracting text from {pdf_path}")
         # Extracts all text from the PDF file
-        text = pymupdf4llm.to_markdown(pdf_path)
-        # somehow text includes zero-width space chars "<200b>", remove these
-        text = text.replace("\u200b", "").replace("<200b>", "")
+        md = MarkItDown()
+        result = md.convert(pdf_path)
+        markdown_text = result.markdown
         # there appear to be lots of tabs and junk in the pdf extraction
         # this somewhat cleans that up
-        clean_text = " ".join(text.split())
         with open(text_file_path, "w") as f:
-            f.write(clean_text)
+            f.write(markdown_text)
             print(f"Wrote parsed content to {text_file_path}")
-        return clean_text
+        return markdown_text
     except Exception as e:
         return str(e)
 
@@ -338,8 +349,12 @@ def get_list_of_files_desc(folder):
 
 
 if __name__ == "__main__":
+    job_text = get_text_from_url("https://www.linkedin.com/jobs/view/4307063567/")
+    print(job_text)
+    sys.exit()
     load_dotenv()
     default_resume = os.getenv("DEFAULT_RESUME")
+    default_resume = "/home/venkman/Downloads/NarayanNatarajan Resume (4).pdf"
     resume_text = extract_text_from_pdf(default_resume)
     candidate_name = nlp_extract_candidate_name(resume_text)
     print(candidate_name)

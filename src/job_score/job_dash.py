@@ -1,9 +1,10 @@
+import chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function
 import streamlit as st
 import os
 import traceback
 import tempfile
 import json
-import resume_job_scorer
+import crew_analyzer
 from lib import utils
 from dotenv import load_dotenv
 from datetime import datetime
@@ -103,7 +104,7 @@ if analyze_button:
             elif job_text:
                 # write to a temp file
                 with tempfile.NamedTemporaryFile(
-                    delete=False, suffix=".txt", dir="jobs"
+                    delete=False, suffix=".txt", dir=st.session_state.job_storage_dir
                 ) as tmp_file:
                     tmp_file.write(job_text.encode())
                     tmp_file_path = tmp_file.name
@@ -124,7 +125,7 @@ if analyze_button:
                 resume_parsed_filename = os.path.basename(tmp_file_path)
                 # Run the crew
                 resume_analysis, resume_analysis_path, resume_crew_usage_metrics = (
-                    resume_job_scorer.resume_skill_analyser_crew(
+                    crew_analyzer.resume_skill_analyzer_crew(
                         tmp_file_path, resume_caching
                     )
                 )
@@ -138,15 +139,31 @@ if analyze_button:
                     )
                 with col_resume_analysis2:
                     display_usage_metrics(resume_crew_usage_metrics)
+
+            with st.spinner("Analysing job..."):
+                job_analysis, job_analysis_path, job_details, job_crew_usage_metrics = (
+                    crew_analyzer.job_requirements_analyzer_crew(job_url, job_caching)
+                )
+
+                col_job_analysis1, col_job_analysis2 = st.columns([0.8, 0.2])
+                with col_job_analysis1:
+                    st.success(
+                        f"**Job analysis complete!**  \n"
+                        f"Analysis saved to: `{job_analysis_path}`"
+                    )
+                with col_job_analysis2:
+                    display_usage_metrics(job_crew_usage_metrics)
+
             with st.spinner("Analyzing Job vs Resume skills and Deciding..."):
                 (
                     final_decision,
                     final_decision_path,
                     job_details,
                     job_crew_usage_metrics,
-                ) = resume_job_scorer.job_analysis_and_decision_crew(
-                    job_url,
+                ) = crew_analyzer.job_vs_resume_analyzer_crew(
+                    job_analysis,
                     resume_analysis,
+                    job_details,
                     job_caching,
                 )
 
@@ -161,7 +178,7 @@ if analyze_button:
 
             # Parse the output
             try:
-                result_json = utils.extract_json_from_crew_output(final_decision.raw)
+                result_json = crew_analyzer.result_to_json(final_decision)
             except Exception as e:
                 st.error(f"Failed to parse result JSON: {e}")
                 st.text(final_decision.raw)
