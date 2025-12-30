@@ -1,0 +1,113 @@
+resume_skill_analysis:
+  description: >
+    Extract the skills and years of work experience from the resume raw string data 
+    within resume text.
+    work experience is overall number of years from the start date of the first job
+    to the end date of the last job and round up.
+    Identify certifications and security clearances.
+    Resume Text is provided as below: {resume_text}
+  expected_output: >
+    Output MUST be just the JSON object, 
+    for example : 
+        {
+            "resume_skills":["Python","WAF","Jira"], 
+            "years_of_experience":5,
+            "certifications":["CISSP", "AWS Certified Solutions Architect-Associate","AWS Certified Developer-Associate"],
+            "security_clearances":["TS/SCI"],
+        }
+  agent: resume_agent
+
+job_requirements_analysis:
+  description: >
+    Extract the following information from the job description:
+    * organization name,
+    * summary of the role,
+    * years of industry experience,
+    * and skills categorized into required and preferred.
+    * Required certifications
+    * Required security clearances.
+    Job description is in: {job_text}
+  expected_output: >
+    Output MUST be just the JSON object, 
+    for example:
+    {
+      "organization": "Company Name",
+      "job_summary": "Role summary text",
+      "years_of_experience": 5,
+      "required_skills": ["Python", "Java"],
+      "preferred_skills": ["AWS", "Kubernetes"],
+      "required_certifications": ["CISSP"],
+      "required_security_clearances": ["TS/SCI"]
+    }
+  agent: job_agent
+
+resume_to_job_match_analysis:
+  description: >
+    # Goal:
+    Review the job description analysis and resume analysis to compare candidate skills and assign a score.
+
+    ## Use this criteria to calculate the score:
+    1. Calculate 'required_skill_match_score': Count the number of required skills in the job 
+       that are present in the candidate and divide by the total number of required skills in 
+       the job to get the required skill match score.
+    2. Calculate 'preferred_skill_match_score': Count the number of preferred skills in the job
+       that are present in the candidate and divide by the total number of preferred skills in 
+       the job to get the preferred skill match score.
+    3. Calculate 'final_score': 
+       Final score = required_skill_match_score * 0.7 + preferred_skill_match_score * 0.3  
+       for example if job has 10 required skills and 5 preferred skills and 
+       candidate has 8 required skills and 3 preferred skills then final score = 8/10 * 0.7 + 3/5 * 0.3 = 0.74
+    4. Score data should be presented as keys in JSON output as below:
+       a. A tag named "score" which is a dictionary with the following keys:
+          i. final_score
+          ii. required_skill_match_score
+          iii. preferred_skill_match_score
+          iv. matching_required_skills_count, 
+          v. missing_required_skills_count, 
+          vi. matching_preferred_skills_count, 
+          vii. missing_preferred_skills_count, 
+          viii. total_required_skills_count,
+          ix.  total_preferred_skills_count, 
+    ## Comparison guidance for candidate skills vs job requirements: 
+    1. Look at the required missing skills, if any of the following appear then candidate will not pass:
+        a. Active Security Clearance.
+        b. Specific certifications that are required.
+        c. If a skill mentions a minimum years of experience, then compare 
+    2. If the candidate does not fail due to any of the above criteria, and the final score is above 70%,
+    then the decision should be "Pass" and the reason should be "Score is above 70% and candidate has sufficient skills and years of experience".
+    Otherwise the decision should be "Fail" along with the appropriate reason(s).
+    3. Provide the final decision and reason in the output.
+  expected_output: >
+    Output MUST be just the JSON object, 
+    for example : 
+        {
+            "matching_required_skills":["Java","Python"], 
+            "missing_required_skills":["Ruby", "TOGAF"], 
+            "matching_preferred_skills":["CISSP","WAF"],
+            "missing_preferred_skills":["Jira","management"],
+            "matching_certifications":["CISSP"],
+            "missing_certifications":["AWS Certified Solutions Architect-Associate"],
+            "matching_security_clearances":["TS/SCI"],
+            "missing_security_clearances":["TS/SCI"],
+            "score": {
+                "final_score": 0.7633,
+                "required_skill_match_score": 0.8333,
+                "preferred_skill_match_score": 0.60,
+                "matching_required_skills_count": 20,
+                "missing_required_skills_count": 4,
+                "matching_preferred_skills_count": 6,
+                "missing_preferred_skills_count": 4,
+                "total_required_skills_count": 24,
+                "total_preferred_skills_count": 10,
+                "matching_certifications_count": 1,
+                "missing_certifications_count": 1,
+                "matching_security_clearances_count": 1,
+                "missing_security_clearances_count": 1
+            },
+            "organization":"Google",
+            "years_of_experience":5,
+            "job_summary":"Role summary text",
+            "decision":"Pass",
+            "reason":"Score is above 70% and candidate has sufficient skills and years of experience"
+        }
+  agent: hr_agent

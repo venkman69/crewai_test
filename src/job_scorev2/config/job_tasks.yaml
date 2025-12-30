@@ -1,0 +1,24 @@
+
+job_requirements_analysis:
+  description: >
+    Extract the following information from the job description, where each element is verifyable exactly:
+    * organization name: Typically the name of the hiring organization is in the first few lines of the job description or 'About job' etc. Only report an exact finding.
+    * summary of the role,
+    * years of industry experience,
+    * and skills categorized into required and preferred.
+    * Required certifications
+    * Required security clearances: if descripton uses the words such as "ability to obtain" for example: "Must have the ability to obtain / maintain a Public Trust clearance.", then security clearance is not required only preferred.
+    Job description is in: {job_text}
+  expected_output: >
+    Output MUST be just the JSON object, 
+    for example:
+    {
+      "organization": "Company Name",
+      "job_summary": "Role summary text",
+      "years_of_experience": 5,
+      "required_skills": ["Python", "Java"],
+      "preferred_skills": ["AWS", "Kubernetes"],
+      "required_certifications": ["CISSP"],
+      "required_security_clearances": ["TS/SCI"]
+    }
+  agent: job_agent

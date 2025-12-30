@@ -1,0 +1,68 @@
+resume_to_job_match_analysis:
+   description: >
+      # Goal:
+      Review the job description and resume to compare candidate skills and assign a score.
+
+      # Process to compare:
+      1. Identify requirements from the job description and categorize them as required or preferred. These maybe skills, certifications, security clearances, years of experience, etc.
+      2. For each requirement, check if resume indicates that the candidate has the skill.
+
+      # Additional information MUST be extracted from **job description** (not resume):
+      1. Organization name
+      2. Years of experience
+      3. Job summary
+
+      # scoring criteria:
+      1. Score  = (matching required skills count / total required skills count) *0.7 + (matching preferred skills count / total preferred skills count) * 0.3
+      2. If score is above 70%, candidate is a good fit for the job.
+      3. If score is below 70%, candidate is not a good fit for the job.
+
+      # Inputs: 
+      * Job url: {job_url}
+      * Job ID: {job_id}
+      * Job Source: {job_source} 
+      * Job description: 
+        --- START OF JOB DESCRIPTION ---
+        {job_description} 
+        --- END OF JOB DESCRIPTION ---
+      * Resume: 
+        --- START OF RESUME ---
+        {resume}
+        --- END OF RESUME ---
+      * Candidate is US Citizen: {us_citizen}
+      * Candidate has Security Clearance: {security_clearance}
+
+   expected_output: >
+      Output MUST be just the JSON object, 
+      for example : 
+         {
+               "matching_required_skills":["Java","Python"], 
+               "missing_required_skills":["Ruby", "TOGAF"], 
+               "matching_preferred_skills":["CISSP","WAF"],
+               "missing_preferred_skills":["Jira","management"],
+               "matching_certifications":["CISSP"],
+               "missing_certifications":["AWS Certified Solutions Architect-Associate"],
+               "matching_security_clearances":["TS/SCI"],
+               "missing_security_clearances":["TS/SCI"],
+               "score": {
+                  "final_score": 0.7633,
+                  "required_skill_match_score": 0.8333,
+                  "preferred_skill_match_score": 0.60,
+                  "matching_required_skills_count": 20,
+                  "missing_required_skills_count": 4,
+                  "matching_preferred_skills_count": 6,
+                  "missing_preferred_skills_count": 4,
+                  "total_required_skills_count": 24,
+                  "total_preferred_skills_count": 10,
+                  "matching_certifications_count": 1,
+                  "missing_certifications_count": 1,
+                  "matching_security_clearances_count": 1,
+                  "missing_security_clearances_count": 1
+               },
+               "organization":"Google", # MUST be extracted from job description
+               "years_of_experience":5, # MUST be extracted from job description
+               "job_summary":"Role summary text", # MUST be extracted from job description
+               "decision":"Pass",
+               "reason":"Score is above 70% and candidate has sufficient skills and years of experience"
+         }
+   agent: hr_agent
