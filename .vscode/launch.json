@@ -10,9 +10,11 @@
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             },
+            "justMyCode": false
         },
         {
             "name": "Streamlit app",
@@ -44,6 +46,26 @@
             "args": [
                 "run",
                 "src/job_score/job_dash.py",
+                "--server.headless",
+                "true",
+                "--server.port",
+                "8501",
+            ],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}/src"
+            }
+        },
+        {
+            "name": "Job Score v2 Streamlit app",
+            "type": "python",
+            "request": "launch",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "module": "streamlit",
+            "args": [
+                "run",
+                "src/job_scorev2/job_dash.py",
                 "--server.headless",
                 "true",
                 "--server.port",

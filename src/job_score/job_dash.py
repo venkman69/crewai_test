@@ -1,9 +1,7 @@
-import chromadb.utils.embedding_functions.cloudflare_workers_ai_embedding_function
 import streamlit as st
 import os
 import traceback
 import tempfile
-import json
 import crew_analyzer
 from lib import utils
 from dotenv import load_dotenv
